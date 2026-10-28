@@ -1,0 +1,60 @@
+======================================================================
+  ISLA DEV — REQUISITOS Y CONFIGURACIÓN PARA QUE TODO FUNCIONE AL 100%
+  Desarrollado por Ing. Andres Luna
+======================================================================
+
+Isla Dev es una Isla Dinámica nativa para desarrolladores en Windows.
+Para aprovechar todas sus funciones integradas (creación de proyectos,
+servidores en vivo y subida automática a GitHub), asegúrate de tener
+configurado lo siguiente en tu sistema:
+
+----------------------------------------------------------------------
+1. SUBIDA AUTOMÁTICA A GITHUB Y COMMITS (Git + GitHub CLI)
+----------------------------------------------------------------------
+Para que funcione el botón de "Subir a GitHub automáticamente" al crear
+un proyecto y el panel de "Commit y Push a GitHub":
+
+  A) Tener instalado Git:
+     - Descarga: https://git-scm.com/download/win
+     - O por consola: winget install --id Git.Git -e
+     - Configura tu nombre y correo en una terminal (una sola vez):
+         git config --global user.name "Tu Nombre"
+         git config --global user.email "tu-correo@ejemplo.com"
+
+  B) Tener instalado GitHub CLI (gh) e INICIAR SESIÓN:
+     - Descarga: https://cli.github.com/
+     - O por consola: winget install --id GitHub.cli -e
+     - ¡IMPORTANTE! Debes iniciar sesión con tu cuenta de GitHub
+       abriendo una terminal (PowerShell o CMD) y ejecutando:
+         gh auth login
+       (Selecciona: GitHub.com -> HTTPS -> Login with a web browser).
+
+----------------------------------------------------------------------
+2. CREACIÓN DE FRAMEWORKS Y SERVIDORES LOCALES (Node.js / npm)
+----------------------------------------------------------------------
+Para crear proyectos de React, Vite, Next.js, Astro, Vue, Svelte,
+Angular o Express, instalar librerías desde la isla y encender
+servidores en vivo ("Live Dev Servers" con el botón Play):
+
+  - Instala Node.js (versión LTS recomendada):
+    https://nodejs.org/
+    O por consola: winget install OpenJS.NodeJS.LTS
+
+----------------------------------------------------------------------
+3. EDITORES DE CÓDIGO COMPATIBLES ("Abrir con...")
+----------------------------------------------------------------------
+Isla Dev detecta y abre tus proyectos (y salta a la ventana si ya
+están abiertos sin duplicar pestañas) en:
+  - Antigravity IDE
+  - Visual Studio Code (VS Code)
+  - Cursor
+  - O cualquier otro editor (.exe) que agregues desde:
+    Ajustes (⚙) -> Personalizar Programas, Frameworks y Librerías.
+
+----------------------------------------------------------------------
+4. OPCIONALES SEGÚN TUS PROYECTOS
+----------------------------------------------------------------------
+  - Python 3 (https://python.org) -> Para plantillas Python (.venv)
+  - Rust / Cargo (https://rustup.rs) -> Para plantillas Rust
+  - Windows Terminal (wt) -> Para abrir consolas modernas
+

@@ -11,11 +11,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::actions::{self, GitInfo, WorkMsg, WM_WORKER};
+use crate::actions::{self, GitInfo, OpenProjectWindow, WorkMsg, WM_WORKER};
 use crate::config::{self, hex, Config, Launcher, Library, Project, Template, APP_AUTHOR, APP_VERSION};
 use crate::gfx::Gfx;
 
-pub const WIN_W: f32 = 590.0;
+pub const WIN_W: f32 = 820.0;
 pub const WIN_H: f32 = 760.0;
 const TOP: f32 = 0.0;
 pub const WM_TRAY: u32 = WM_APP + 2;
@@ -79,6 +79,8 @@ pub enum Hit {
     ProjTerm(usize),
     ProjExplorer(usize),
     ProjPin(usize),
+    OpenWinFocus(usize),
+    OpenWinClose(usize),
     NewProject,
     // Wizard
     Template(usize),
@@ -215,10 +217,12 @@ pub struct App {
     // buscador instantáneo ("Spotlight")
     search: String,
     sel_idx: usize,
-    // estado de Git y servidores en tiempo real
+    // estado de Git, servidores y ventanas abiertas en tiempo real
     git_states: HashMap<String, GitInfo>,
     servers: HashMap<String, RunningServer>,
     active_ports: Vec<u16>,
+    open_windows: Vec<OpenProjectWindow>,
+    open_scroll: usize,
     // asistente de creación
     step: Step,
     wiz_name: String,
@@ -314,6 +318,8 @@ impl App {
             git_states: HashMap::new(),
             servers: HashMap::new(),
             active_ports: Vec::new(),
+            open_windows: Vec::new(),
+            open_scroll: 0,
             step: Step::Name,
             wiz_name: String::new(),
             wiz_tpl: 0,
@@ -394,10 +400,11 @@ impl App {
         }
     }
 
-    fn refresh_live_state(&self) {
+    fn refresh_live_state(&mut self) {
         let paths: Vec<String> = self.cfg.projects.iter().map(|p| p.path.clone()).collect();
         let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
         let hw = self.hwnd.0 as isize;
+        self.open_windows = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
         actions::inspect_git_all(paths, self.tx.clone(), hw);
         actions::scan_open_ports(extra_ports, self.tx.clone(), hw);
     }
@@ -444,7 +451,31 @@ impl App {
             }
         }
 
-        // 2. Escanear puertos activos
+        // Mantener la isla siempre visible por encima de la barra de tareas y bandeja del sistema
+        if self.visible && !self.auto_hidden_fs {
+            unsafe {
+                let _ = SetWindowPos(
+                    self.hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+        }
+
+        // 2. Actualizar proyectos abiertos actualmente en editores/programas
+        let new_open = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
+        if new_open != self.open_windows {
+            self.open_windows = new_open;
+            if self.view == View::Expanded {
+                self.kick();
+            }
+        }
+
+        // 3. Escanear puertos activos
         let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
         actions::scan_open_ports(extra_ports, self.tx.clone(), self.hwnd.0 as isize);
     }
@@ -684,10 +715,11 @@ impl App {
             }
             View::Expanded => {
                 let filtered_len = self.filtered_projects().len();
-                let n = filtered_len.clamp(1, MAX_ROWS) as f32;
+                let open_len = self.open_windows.len();
+                let n = filtered_len.clamp(1, MAX_ROWS).max(open_len.min(MAX_ROWS)) as f32;
                 let ports_bar = if self.active_ports.is_empty() { 0.0 } else { 32.0 };
                 let search_bar = 44.0;
-                (556.0, 64.0 + ports_bar + search_bar + n * 54.0 + 54.0 + 16.0, 26.0)
+                (784.0, 64.0 + ports_bar + search_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
             View::Settings => (548.0, 64.0 + 9.0 * 48.0 + 38.0, 26.0),
             View::Wizard => {
@@ -943,6 +975,7 @@ impl App {
                 View::CustomEditor => self.draw_custom_editor(lx, y, tw, th),
                 View::Status => self.draw_status(lx, y, tw, h),
             }
+            self.draw_tooltip(lx, y, tw, h);
             g.alpha.set(1.0);
             g.unclip();
         }
@@ -1014,21 +1047,122 @@ impl App {
     }
 
     fn count_text(&self) -> String {
-        let base = match self.cfg.projects.len() {
+        let mut parts = Vec::new();
+        parts.push(match self.cfg.projects.len() {
             0 => "Sin proyectos aún".into(),
             1 => "1 proyecto".into(),
             n => format!("{n} proyectos"),
-        };
+        });
+        let open_cnt = self.open_windows.len();
+        if open_cnt > 0 {
+            parts.push(format!(
+                "{open_cnt} abierto{}",
+                if open_cnt == 1 { "" } else { "s" }
+            ));
+        }
         let active_cnt = self.active_server_count();
         if active_cnt > 0 {
-            format!(
-                "{base} · {active_cnt} servidor{} activo{}",
+            parts.push(format!(
+                "{active_cnt} servidor{} activo{}",
                 if active_cnt == 1 { "" } else { "es" },
                 if active_cnt == 1 { "" } else { "s" }
-            )
-        } else {
-            base
+            ));
         }
+        parts.join(" · ")
+    }
+
+    fn tooltip_for_hit(&self, h: Hit) -> Option<String> {
+        match h {
+            Hit::Settings => Some("Ajustes y configuración".into()),
+            Hit::Close => Some("Minimizar isla (Esc)".into()),
+            Hit::Back => Some("Volver atrás (Esc)".into()),
+            Hit::ClearSearch => Some("Limpiar búsqueda".into()),
+            Hit::PortBadge(port) | Hit::ProjPort(_, port) => {
+                Some(format!("Abrir http://localhost:{port} en el navegador"))
+            }
+            Hit::PortTerm(port) => Some(format!("Ver terminal del servidor en :{port}")),
+            Hit::KillPort(port) => Some(format!("Detener proceso que ocupa el puerto :{port}")),
+            Hit::ProjServer(i) => {
+                let p = self.cfg.projects.get(i)?;
+                if self.servers.contains_key(&p.path) {
+                    Some("Detener servidor local".into())
+                } else {
+                    Some("Iniciar servidor local (npm run dev)".into())
+                }
+            }
+            Hit::ProjServerTerm(_) => Some("Ver terminal del servidor en vivo".into()),
+            Hit::ProjGit(i) => {
+                let p = self.cfg.projects.get(i)?;
+                if let Some(g) = self.git_states.get(&p.path) {
+                    if g.dirty {
+                        Some(format!(
+                            "Git & GitHub · {} cambios sin guardar (Commit / Push)",
+                            g.changed_count
+                        ))
+                    } else if g.remote_url.is_some() {
+                        Some(format!("Git & GitHub (rama ⎇ {}) · Commit, Push o Pull", g.branch))
+                    } else {
+                        Some(format!("Subir '{}' a GitHub o hacer Commit", p.name))
+                    }
+                } else {
+                    Some(format!("Inicializar Git y subir '{}' a GitHub", p.name))
+                }
+            }
+            Hit::ProjTerm(i) => {
+                let p = self.cfg.projects.get(i)?;
+                Some(format!("Abrir Terminal en {}", p.name))
+            }
+            Hit::ProjExplorer(i) => {
+                let p = self.cfg.projects.get(i)?;
+                Some(format!("Abrir carpeta '{}' en el Explorador", p.name))
+            }
+            Hit::ProjPin(i) => {
+                let p = self.cfg.projects.get(i)?;
+                if p.pinned {
+                    Some("Desfijar proyecto".into())
+                } else {
+                    Some("Fijar proyecto arriba en favoritos".into())
+                }
+            }
+            Hit::OpenWinFocus(idx) => {
+                let w = self.open_windows.get(idx)?;
+                Some(format!("Saltar a ventana abierta en {}", w.program_name))
+            }
+            Hit::OpenWinClose(idx) => {
+                let w = self.open_windows.get(idx)?;
+                Some(format!("Cerrar ventana de {} ({})", w.project_name, w.program_name))
+            }
+            Hit::EdDeleteItem(_) => Some("Eliminar elemento".into()),
+            _ => None,
+        }
+    }
+
+    fn draw_tooltip(&self, lx: f32, y: f32, tw: f32, panel_h: f32) {
+        let Some(hov) = self.hover else { return };
+        let Some(label) = self.tooltip_for_hit(hov) else { return };
+        let rect = self
+            .hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|h| h.4 == hov)
+            .copied();
+        let Some((hx, hy, hw, hh, _)) = rect else { return };
+
+        let g = &self.gfx;
+        let tip_w = (g.measure(&label, &g.f.small_c) + 20.0).clamp(72.0, tw - 24.0);
+        let tip_h = 24.0;
+        let mut tx = hx + hw * 0.5 - tip_w * 0.5;
+        tx = tx.clamp(lx + 10.0, lx + tw - tip_w - 10.0);
+        let mut ty = hy - tip_h - 6.0;
+        if ty < y + 8.0 {
+            ty = (hy + hh + 6.0).min(y + panel_h - tip_h - 6.0);
+        }
+
+        g.rrect(tx - 1.0, ty + 2.0, tip_w + 2.0, tip_h + 2.0, 7.0, 0x000000, 0.65);
+        g.rrect(tx, ty, tip_w, tip_h, 7.0, 0x18181B, 0.98);
+        g.rrect_stroke(tx + 0.5, ty + 0.5, tip_w - 1.0, tip_h - 1.0, 7.0, WHITE, 0.35, 1.0);
+        g.text(&label, &g.f.small_c, tx + 6.0, ty, tip_w - 12.0, tip_h, WHITE, 1.0);
     }
 
     fn row_bg(&self, lx: f32, ry: f32, tw: f32, h: f32, id: Hit, selected: bool) {
@@ -1141,7 +1275,9 @@ impl App {
         self.hit(sbx, ry + 2.0, sbw - 34.0, sbh, Hit::SearchBox);
         ry += 44.0;
 
-        // 3. Lista de proyectos filtrados (con botones visibles en la barra ancha)
+        // 3. Diseño a dos columnas: Izquierda = Mis Proyectos | Derecha = Abiertos ahora
+        let body_top = ry;
+        let left_w = 504.0;
         let filtered = self.filtered_projects();
         if filtered.is_empty() {
             let msg = if self.cfg.projects.is_empty() {
@@ -1149,7 +1285,7 @@ impl App {
             } else {
                 "No hay proyectos que coincidan con tu búsqueda"
             };
-            g.text(msg, &g.f.sub, lx + 24.0, ry, tw - 48.0, 54.0, DIM, 1.0);
+            g.text(msg, &g.f.sub, lx + 20.0, ry, left_w - 36.0, 54.0, DIM, 1.0);
             ry += 54.0;
         }
 
@@ -1160,13 +1296,14 @@ impl App {
             let Some(p) = self.cfg.projects.get(proj_idx) else { continue };
             let id = Hit::Project(proj_idx);
             let is_kbd_sel = !self.search.is_empty() && vis_idx == self.sel_idx.min(filtered.len().saturating_sub(1));
-            self.row_bg(lx, ry, tw, 54.0, id, is_kbd_sel);
+            self.row_bg(lx, ry, left_w, 54.0, id, is_kbd_sel);
 
             g.draw_stack_badge(&p.stack, lx + 18.0, ry + 9.0, 36.0);
 
-            let title_x = lx + 64.0;
-            let right_reserve = 250.0;
-            let max_title_w = tw - 64.0 - right_reserve;
+            let srv_state = self.servers.get(&p.path);
+            let right_reserve = if srv_state.is_some() { 246.0 } else { 164.0 };
+            let title_x = lx + 62.0;
+            let max_title_w = (left_w - 62.0 - right_reserve).max(90.0);
             let display_name = if p.pinned {
                 format!("📌 {}", p.name)
             } else {
@@ -1175,60 +1312,71 @@ impl App {
             g.text(&display_name, &g.f.title, title_x, ry + 7.0, max_title_w, 20.0, WHITE, 1.0);
 
             let git_opt = self.git_states.get(&p.path);
+            let open_in = self
+                .open_windows
+                .iter()
+                .find(|w| w.project_idx == proj_idx && w.is_ide)
+                .or_else(|| self.open_windows.iter().find(|w| w.project_idx == proj_idx));
+
+            let mut sub_parts = vec![p.stack.clone()];
             if let Some(git) = git_opt {
-                let sub_base = format!("{}  ·  ⎇ {}", p.stack, git.branch);
-                g.text(&sub_base, &g.f.sub, title_x, ry + 27.0, max_title_w, 18.0, GRAY, 1.0);
-            } else {
-                g.text(&p.stack, &g.f.sub, title_x, ry + 27.0, max_title_w, 18.0, GRAY, 1.0);
+                sub_parts.push(format!("⎇ {}", git.branch));
             }
-
-            // Controles siempre visibles a la derecha de cada fila (sin depender del clic derecho)
-            let mut bx = lx + tw - 40.0;
-            // 1. Fijar arriba (Pin)
-            self.mini_action_btn(bx, ry + 13.0, 26.0, G_PIN, WHITE, p.pinned, Hit::ProjPin(proj_idx));
-            bx -= 30.0;
-            // 2. Abrir en Explorador
-            self.mini_action_btn(bx, ry + 13.0, 26.0, G_FOLDER, WHITE, false, Hit::ProjExplorer(proj_idx));
-            bx -= 30.0;
-            // 3. Abrir Terminal en carpeta
-            self.mini_action_btn(bx, ry + 13.0, 26.0, G_TERM, WHITE, false, Hit::ProjTerm(proj_idx));
-
-            // 4. Botón visible de Git / Commit & Push / GitHub
-            let git_dirty = git_opt.map(|g| g.dirty).unwrap_or(false);
-            let git_cnt = git_opt.map(|g| g.changed_count).unwrap_or(0);
-            let git_lbl = if git_dirty {
-                format!("⎇ Commit ({git_cnt})")
-            } else if git_opt.is_some() {
-                "⎇ Git".into()
-            } else {
-                "⎇ GitHub".into()
-            };
-            let git_w = if git_dirty { 76.0 } else { 56.0 };
-            bx -= git_w + 4.0;
-            self.pill_action_btn(
-                bx,
-                ry + 14.0,
-                git_w,
-                26.0,
-                &git_lbl,
-                if git_dirty { AMBER } else { WHITE },
-                git_dirty,
-                Hit::ProjGit(proj_idx),
+            if let Some(ow) = open_in {
+                sub_parts.push(format!("● {}", ow.program_name));
+            }
+            let sub_txt = sub_parts.join(" · ");
+            g.text(
+                &sub_txt,
+                &g.f.sub,
+                title_x,
+                ry + 27.0,
+                max_title_w + 14.0,
+                18.0,
+                if open_in.is_some() { GREEN } else { GRAY },
+                1.0,
             );
 
+            // Controles compactos de icono a la derecha de cada fila (con tooltip al pasar el ratón)
+            let mut bx = lx + left_w - 38.0;
+            // 1. Fijar arriba (Pin)
+            self.mini_action_btn(bx, ry + 14.0, 26.0, G_PIN, WHITE, p.pinned, Hit::ProjPin(proj_idx));
+            bx -= 29.0;
+            // 2. Abrir en Explorador
+            self.mini_action_btn(bx, ry + 14.0, 26.0, G_FOLDER, WHITE, false, Hit::ProjExplorer(proj_idx));
+            bx -= 29.0;
+            // 3. Abrir Terminal en carpeta
+            self.mini_action_btn(bx, ry + 14.0, 26.0, G_TERM, WHITE, false, Hit::ProjTerm(proj_idx));
+            bx -= 29.0;
+
+            // 4. Botón compacto de Git / GitHub (26×26 con punto ámbar si hay cambios pendientes)
+            let git_dirty = git_opt.map(|g| g.dirty).unwrap_or(false);
+            let has_git = git_opt.is_some();
+            self.mini_action_btn(
+                bx,
+                ry + 14.0,
+                26.0,
+                "⎇",
+                if git_dirty { AMBER } else { WHITE },
+                git_dirty || has_git,
+                Hit::ProjGit(proj_idx),
+            );
+            if git_dirty {
+                g.circle(bx + 22.0, ry + 17.0, 3.2, AMBER, 1.0);
+            }
+
             // 5. Controles de Servidor en Vivo (Play / Puerto + Terminal de servidor + Stop)
-            let srv_state = self.servers.get(&p.path);
             let has_dev = actions::detect_dev_command(Path::new(&p.path), &p.stack).is_some();
 
             if let Some(srv) = srv_state {
-                bx -= 30.0;
-                self.mini_action_btn(bx, ry + 13.0, 26.0, G_STOP, RED, true, Hit::ProjServer(proj_idx));
+                bx -= 29.0;
+                self.mini_action_btn(bx, ry + 14.0, 26.0, G_STOP, RED, true, Hit::ProjServer(proj_idx));
 
-                bx -= 30.0;
-                self.mini_action_btn(bx, ry + 13.0, 26.0, G_TERM, GREEN, true, Hit::ProjServerTerm(proj_idx));
+                bx -= 29.0;
+                self.mini_action_btn(bx, ry + 14.0, 26.0, G_TERM, GREEN, true, Hit::ProjServerTerm(proj_idx));
 
                 let port_num = srv.port.unwrap_or(0);
-                let badge_w = 58.0;
+                let badge_w = 54.0;
                 bx -= badge_w + 4.0;
                 let hv_p = self.hov(Hit::ProjPort(proj_idx, port_num));
                 g.rrect(bx, ry + 14.0, badge_w, 26.0, 7.0, GREEN, if hv_p { 0.25 } else { 0.14 });
@@ -1245,28 +1393,153 @@ impl App {
                     self.hit(bx, ry + 14.0, badge_w, 26.0, Hit::ProjServerTerm(proj_idx));
                 }
             } else if has_dev {
-                bx -= 30.0;
-                self.mini_action_btn(bx, ry + 13.0, 26.0, G_PLAY, GREEN, false, Hit::ProjServer(proj_idx));
+                bx -= 29.0;
+                self.mini_action_btn(bx, ry + 14.0, 26.0, G_PLAY, GREEN, false, Hit::ProjServer(proj_idx));
             }
 
             ry += 54.0;
         }
 
         let id = Hit::NewProject;
-        self.row_bg(lx, ry + 4.0, tw, 54.0, id, false);
+        self.row_bg(lx, ry + 4.0, left_w, 54.0, id, false);
         g.rrect(lx + 18.0, ry + 13.0, 36.0, 36.0, 10.0, WHITE, 0.08);
         g.text(G_ADD, &g.f.icon_sm, lx + 18.0, ry + 13.0, 36.0, 36.0, WHITE, 1.0);
         g.text(
             "Crear nuevo proyecto",
             &g.f.title,
-            lx + 64.0,
+            lx + 62.0,
             ry + 4.0,
-            tw - 160.0,
+            left_w - 150.0,
             54.0,
             WHITE,
             1.0,
         );
-        self.chip(lx + tw - 72.0, ry + 20.0, 54.0, "Ctrl N");
+        self.chip(lx + left_w - 72.0, ry + 20.0, 54.0, "Ctrl N");
+
+        // 4. Columna Derecha: "ABIERTOS AHORA" (Proyectos abiertos actualmente y en qué programa)
+        let div_x = lx + left_w + 4.0;
+        let body_bottom = (ry + 56.0).max(body_top + 120.0);
+        g.line(div_x, body_top + 4.0, div_x, body_bottom, WHITE, 0.08, 1.0);
+
+        let rx = div_x + 8.0;
+        let rw = tw - (left_w + 22.0);
+        let mut ory = body_top + 2.0;
+
+        let open_cnt = self.open_windows.len();
+        g.circle(
+            rx + 8.0,
+            ory + 11.0,
+            3.5,
+            if open_cnt > 0 { GREEN } else { DIM },
+            1.0,
+        );
+        g.text(
+            &format!("ABIERTOS AHORA ({open_cnt})"),
+            &g.f.sub,
+            rx + 18.0,
+            ory,
+            rw - 20.0,
+            22.0,
+            if open_cnt > 0 { WHITE } else { GRAY },
+            1.0,
+        );
+        ory += 26.0;
+
+        if self.open_windows.is_empty() {
+            let empty_h = (body_bottom - ory).max(84.0);
+            g.rrect(rx, ory + 2.0, rw, empty_h - 4.0, 12.0, CARD, 0.45);
+            g.rrect_stroke(rx + 0.5, ory + 2.5, rw - 1.0, empty_h - 5.0, 12.0, BORDER, 0.4, 1.0);
+            g.text(
+                "Ningún proyecto abierto",
+                &g.f.body,
+                rx + 14.0,
+                ory + 14.0,
+                rw - 28.0,
+                20.0,
+                GRAY,
+                1.0,
+            );
+            g.text(
+                "Al abrir un proyecto en Antigravity, VS Code o Explorador aparecerá aquí para saltar sin abrir otra ventana.",
+                &g.f.sub,
+                rx + 14.0,
+                ory + 36.0,
+                rw - 28.0,
+                empty_h - 42.0,
+                DIM,
+                1.0,
+            );
+        } else {
+            let max_vis = MAX_ROWS;
+            let max_osc = self.open_windows.len().saturating_sub(max_vis);
+            let osc = self.open_scroll.min(max_osc);
+            for (idx, ow) in self.open_windows.iter().enumerate().skip(osc).take(max_vis) {
+                let hv_card = self.hov(Hit::OpenWinFocus(idx)) || self.hov(Hit::OpenWinClose(idx));
+                g.rrect(
+                    rx,
+                    ory + 2.0,
+                    rw,
+                    48.0,
+                    11.0,
+                    if hv_card { CARD_HOV } else { CARD },
+                    if hv_card { 1.0 } else { 0.72 },
+                );
+                g.rrect_stroke(
+                    rx + 0.5,
+                    ory + 2.5,
+                    rw - 1.0,
+                    47.0,
+                    11.0,
+                    if hv_card { GREEN } else { BORDER },
+                    if hv_card { 0.55 } else { 0.5 },
+                    1.0,
+                );
+                self.hit(rx, ory + 2.0, rw - 30.0, 48.0, Hit::OpenWinFocus(idx));
+
+                g.draw_stack_badge(&ow.stack, rx + 10.0, ory + 10.0, 30.0);
+                g.text(
+                    &ow.project_name,
+                    &g.f.body,
+                    rx + 48.0,
+                    ory + 7.0,
+                    rw - 82.0,
+                    18.0,
+                    WHITE,
+                    1.0,
+                );
+                g.text(
+                    &format!("● {}", ow.program_name),
+                    &g.f.sub,
+                    rx + 48.0,
+                    ory + 25.0,
+                    rw - 82.0,
+                    18.0,
+                    if ow.is_ide { GREEN } else { GRAY },
+                    1.0,
+                );
+
+                // Botón × para cerrar esa ventana si se desea
+                let cx_btn = rx + rw - 28.0;
+                let cy_btn = ory + 15.0;
+                let hv_close = self.hov(Hit::OpenWinClose(idx));
+                if hv_close {
+                    g.rrect(cx_btn, cy_btn, 22.0, 22.0, 6.0, RED, 0.28);
+                }
+                g.text(
+                    G_CLOSE,
+                    &g.f.icon_sm,
+                    cx_btn,
+                    cy_btn,
+                    22.0,
+                    22.0,
+                    if hv_close { RED } else { GRAY },
+                    1.0,
+                );
+                self.hit(cx_btn, cy_btn, 22.0, 22.0, Hit::OpenWinClose(idx));
+
+                ory += 52.0;
+            }
+        }
     }
 
     fn monitor_label(&self) -> String {
@@ -2021,6 +2294,30 @@ impl App {
             .clone()
             .or(p.launcher.clone())
             .unwrap_or(self.cfg.default_launcher.clone());
+
+        // Si el proyecto ya está abierto en un editor/programa compatible, saltar a esa ventana en vez de abrir otra duplicada
+        if let Some(prog_name) = actions::focus_existing_project_window(&self.cfg.projects, i, &lid, self.hwnd) {
+            self.s_log_path = None;
+            self.status(
+                SKind::Done,
+                &p.name,
+                &format!("Ya abierto · Saltando a {prog_name}"),
+                WHITE,
+                "✓",
+            );
+            self.s_deadline = Some(Instant::now() + Duration::from_millis(1100));
+            if let Some(pp) = self.cfg.projects.get_mut(i) {
+                pp.last_opened = config::now();
+                if launcher.is_some() {
+                    pp.launcher = launcher;
+                }
+            }
+            self.cfg.sort_projects();
+            self.scroll = 0;
+            self.save();
+            return;
+        }
+
         let Some(l) = self.cfg.launcher(&lid).cloned() else { return };
         match actions::launch(&l, &p.path) {
             Ok(()) => {
@@ -2455,17 +2752,34 @@ impl App {
             }
             Hit::ProjTerm(i) => {
                 if let Some(p) = self.cfg.projects.get(i) {
-                    actions::open_terminal_at(Path::new(&p.path));
+                    if actions::focus_existing_project_window(&self.cfg.projects, i, "terminal", self.hwnd).is_none() {
+                        actions::open_terminal_at(Path::new(&p.path));
+                    }
                     self.minimize_preserving_state();
                 }
             }
             Hit::ProjExplorer(i) => {
                 if let Some(p) = self.cfg.projects.get(i) {
-                    actions::open_explorer_at(Path::new(&p.path));
+                    if actions::focus_existing_project_window(&self.cfg.projects, i, "explorer", self.hwnd).is_none() {
+                        actions::open_explorer_at(Path::new(&p.path));
+                    }
                     self.minimize_preserving_state();
                 }
             }
             Hit::ProjPin(i) => self.toggle_pin(i),
+            Hit::OpenWinFocus(idx) => {
+                if let Some(ow) = self.open_windows.get(idx).cloned() {
+                    actions::bring_hwnd_to_front(HWND(ow.hwnd as _));
+                    self.minimize_preserving_state();
+                }
+            }
+            Hit::OpenWinClose(idx) => {
+                if let Some(ow) = self.open_windows.get(idx).cloned() {
+                    actions::close_window_handle(ow.hwnd);
+                    self.open_windows.remove(idx);
+                    self.kick();
+                }
+            }
             Hit::NewProject => self.start_wizard(),
             Hit::Template(i) => {
                 if self.view == View::Wizard {
@@ -2766,7 +3080,13 @@ impl App {
             }
 
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(menu, MF_STRING, 201, w!("🗑 Quitar proyecto de la lista"));
+            let _ = AppendMenuW(menu, MF_STRING, 201, w!("📋 Quitar proyecto solo de la lista"));
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                204,
+                w!("🗑 Eliminar proyecto por completo (borrar carpeta del disco)"),
+            );
 
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
@@ -2793,6 +3113,51 @@ impl App {
                 self.scroll = 0;
                 self.save();
                 self.kick();
+            } else if cmd == 204 {
+                if actions::confirm_delete_project(self.hwnd, &p.name, &p.path) {
+                    if let Some(srv) = self.servers.remove(&p.path) {
+                        actions::stop_dev_server(srv.pid);
+                    }
+                    for ow in &self.open_windows {
+                        if ow.project_path.eq_ignore_ascii_case(&p.path) {
+                            actions::close_window_handle(ow.hwnd);
+                        }
+                    }
+                    match actions::delete_project_from_disk(Path::new(&p.path)) {
+                        Ok(()) => {
+                            if let Some(pos) = self
+                                .cfg
+                                .projects
+                                .iter()
+                                .position(|x| x.path.eq_ignore_ascii_case(&p.path))
+                            {
+                                self.cfg.projects.remove(pos);
+                            }
+                            self.git_states.remove(&p.path);
+                            self.scroll = 0;
+                            self.save();
+                            self.open_windows = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
+                            self.status(
+                                SKind::Done,
+                                &format!("{} eliminado", p.name),
+                                "Se borró la carpeta del proyecto del disco",
+                                WHITE,
+                                "✓",
+                            );
+                            self.s_deadline = Some(Instant::now() + Duration::from_millis(1800));
+                        }
+                        Err(e) => {
+                            self.error(
+                                &format!("No se pudo borrar {}", p.name),
+                                &format!("{e} (cierra programas que usen esa carpeta)"),
+                                None,
+                            );
+                        }
+                    }
+                } else {
+                    self.focus();
+                    self.kick();
+                }
             } else if cmd == 300 {
                 self.toggle_project_server(i);
             } else if cmd == 302 {
@@ -3186,21 +3551,20 @@ impl App {
                     {
                         self.minimize_preserving_state();
                     }
-                    let _ = SetWindowPos(
-                        self.hwnd,
-                        HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
+                    let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+                    if self.visible && !self.auto_hidden_fs {
+                        flags |= SWP_SHOWWINDOW;
+                    }
+                    let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
                     None
                 }
                 WM_WINDOWPOSCHANGING => {
                     let ppos = lp.0 as *mut WINDOWPOS;
                     if !ppos.is_null() {
                         (*ppos).hwndInsertAfter = HWND_TOPMOST;
+                        if self.visible && !self.auto_hidden_fs {
+                            (*ppos).flags &= !SWP_HIDEWINDOW;
+                        }
                     }
                     None
                 }
