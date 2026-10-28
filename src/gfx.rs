@@ -19,7 +19,11 @@ pub struct Fonts {
     pub title_c: IDWriteTextFormat,
     pub body: IDWriteTextFormat,
     pub sub: IDWriteTextFormat,
+    pub sub_c: IDWriteTextFormat,
     pub sub_r: IDWriteTextFormat,
+    pub badge: IDWriteTextFormat,
+    pub tiny: IDWriteTextFormat,
+    pub tiny_c: IDWriteTextFormat,
     pub small_c: IDWriteTextFormat,
     pub btn: IDWriteTextFormat,
     pub input: IDWriteTextFormat,
@@ -119,7 +123,11 @@ impl Fonts {
             title_c: fmt(dw, &ui, 15.0, DWRITE_FONT_WEIGHT_BOLD, c)?,
             body: fmt(dw, &ui, 13.5, DWRITE_FONT_WEIGHT_NORMAL, l)?,
             sub: fmt(dw, &ui, 12.0, DWRITE_FONT_WEIGHT_NORMAL, l)?,
+            sub_c: fmt(dw, &ui, 12.0, DWRITE_FONT_WEIGHT_NORMAL, c)?,
             sub_r: fmt(dw, &ui, 12.0, DWRITE_FONT_WEIGHT_NORMAL, r)?,
+            badge: fmt(dw, &ui, 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, c)?,
+            tiny: fmt(dw, &ui, 11.0, DWRITE_FONT_WEIGHT_MEDIUM, l)?,
+            tiny_c: fmt(dw, &ui, 11.0, DWRITE_FONT_WEIGHT_MEDIUM, c)?,
             small_c: fmt(dw, &ui, 10.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, c)?,
             btn: fmt(dw, &ui, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, c)?,
             input: fmt(dw, &ui, 15.0, DWRITE_FONT_WEIGHT_NORMAL, l)?,
@@ -513,12 +521,86 @@ impl Gfx {
         }
     }
 
+    /// Barra de progreso luminosa que recorre el borde inferior curvo de la gota mientras una tarea corre en 2do plano.
+    pub fn draw_waterdrop_progress(&self, cx: f32, w: f32, h: f32, frac: f32, color: u32) {
+        let f = frac.clamp(0.04, 1.0);
+        if let Ok(curve) = self.waterdrop_curve_path(cx, w, h) {
+            self.stroke_path(&curve, 0xFFFFFF, 0.14, 1.8);
+            let left = cx - w * 0.5 - 4.0;
+            let fill_w = (w + 8.0) * f;
+            self.clip(left, 0.0, fill_w, h + 10.0);
+            self.stroke_path(&curve, color, 0.30, 5.0);
+            self.stroke_path(&curve, color, 0.98, 2.2);
+            self.unclip();
+        }
+    }
+
+    /// Dibuja el icono vectorial oficial de rama Git (2 nodos principales + 1 nodo bifurcado con curva suave).
+    pub fn draw_git_branch_icon(&self, x: f32, y: f32, s: f32, color: u32, a: f32) {
+        let cx = x + s * 0.5;
+        let cy = y + s * 0.5;
+        let dx = s * 0.19;
+        let dy = s * 0.25;
+        let r = (s * 0.085).clamp(1.5, 2.4);
+        let sw = (s * 0.075).clamp(1.2, 1.7);
+
+        let x_left = cx - dx;
+        let y_top = cy - dy;
+        let y_bot = cy + dy;
+        let x_right = cx + dx;
+        let y_branch = cy - dy * 0.65;
+
+        // Tronco vertical izquierdo
+        self.line(x_left, y_top + r, x_left, y_bot - r, color, a, sw);
+
+        // Curva en S desde el tronco hacia el nodo superior derecho
+        unsafe {
+            if let Ok(path) = self.factory.CreatePathGeometry() {
+                if let Ok(sink) = path.Open() {
+                    sink.BeginFigure(
+                        D2D_POINT_2F {
+                            x: x_left,
+                            y: y_bot - r * 1.2,
+                        },
+                        D2D1_FIGURE_BEGIN_HOLLOW,
+                    );
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: D2D_POINT_2F {
+                            x: x_left,
+                            y: cy,
+                        },
+                        point2: D2D_POINT_2F {
+                            x: x_right,
+                            y: cy + dy * 0.15,
+                        },
+                        point3: D2D_POINT_2F {
+                            x: x_right,
+                            y: y_branch + r,
+                        },
+                    });
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    let _ = sink.Close();
+                    self.stroke_path(&path, color, a, sw);
+                }
+            }
+        }
+
+        // Los 3 nodos circulares de la rama
+        self.ring(x_left, y_top, r, color, a, sw);
+        self.ring(x_left, y_bot, r, color, a, sw);
+        self.ring(x_right, y_branch, r, color, a, sw);
+    }
+
     /// Dibuja la insignia con el icono vectorial oficial de la tecnología en estilo minimalista
     pub fn draw_stack_badge(&self, stack: &str, x: f32, y: f32, s: f32) {
         let r = s * 0.28;
         self.rrect(x, y, s, s, r, 0x141416, 1.0);
         self.rrect_stroke(x, y, s, s, r, 0x27272A, 1.0, 1.0);
+        self.draw_stack_icon_only(stack, x, y, s);
+    }
 
+    /// Dibuja únicamente el glifo vectorial de la tecnología sin caja exterior (útil en la píldora compacta y badges).
+    pub fn draw_stack_icon_only(&self, stack: &str, x: f32, y: f32, s: f32) {
         let cx = x + s * 0.5;
         let cy = y + s * 0.5;
         let st = stack.to_lowercase();

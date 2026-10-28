@@ -4,6 +4,8 @@ mod actions;
 mod app;
 mod config;
 mod gfx;
+mod modals;
+mod views;
 
 use std::cell::RefCell;
 

@@ -11,54 +11,74 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::actions::{self, GitInfo, OpenProjectWindow, WorkMsg, WM_WORKER};
-use crate::config::{self, hex, Config, Launcher, Library, Project, Template, APP_AUTHOR, APP_VERSION};
+use crate::actions::{self, FullStackInfo, GitInfo, OpenProjectWindow, WorkMsg, WM_WORKER};
+use crate::config::{self, hex, Config, Launcher, Library, Project, Template};
 use crate::gfx::Gfx;
 
 pub const WIN_W: f32 = 820.0;
 pub const WIN_H: f32 = 760.0;
-const TOP: f32 = 0.0;
+pub(crate) const TOP: f32 = 0.0;
 pub const WM_TRAY: u32 = WM_APP + 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_ANIM: usize = 1;
 const TIMER_POLL: usize = 2;
 const HOTKEY_ID: i32 = 1;
-const MAX_ROWS: usize = 6;
+pub(crate) const MAX_ROWS: usize = 6;
 
-// Paleta Black & White minimalista (Apple / Vercel style) + indicadores semánticos
-const WHITE: u32 = 0xFFFFFF;
-const GRAY: u32 = 0xA1A1AA;
-const DIM: u32 = 0x52525B;
-const ACCENT: u32 = 0xFFFFFF;
-const BODY: u32 = 0x000000;
-const CARD: u32 = 0x121214;
-const CARD_HOV: u32 = 0x1C1C20;
-const BORDER: u32 = 0x27272A;
-const RED: u32 = 0xEF4444;
-const GREEN: u32 = 0x22C55E;
-const AMBER: u32 = 0xF59E0B;
+// Paleta Black & White minimalista (Apple / Vercel / Linear style) + indicadores semánticos
+pub(crate) const WHITE: u32 = 0xFFFFFF;
+pub(crate) const GRAY: u32 = 0xA1A1AA;
+pub(crate) const DIM: u32 = 0x52525B;
+pub(crate) const ACCENT: u32 = 0xFFFFFF;
+pub(crate) const BODY: u32 = 0x000000;
+pub(crate) const CARD: u32 = 0x121214;
+pub(crate) const CARD_HOV: u32 = 0x1C1C20;
+pub(crate) const BORDER: u32 = 0x27272A;
+pub(crate) const RED: u32 = 0xEF4444;
+pub(crate) const GREEN: u32 = 0x22C55E;
+pub(crate) const AMBER: u32 = 0xF59E0B;
+pub(crate) const CYAN: u32 = 0x38BDF8;
 
 // Glifos Segoe Fluent Icons / MDL2
-const G_CHEV: &str = "\u{E76C}";
-const G_BACK: &str = "\u{E72B}";
-const G_ADD: &str = "\u{E710}";
-const G_GEAR: &str = "\u{E713}";
-const G_CLOSE: &str = "\u{E711}";
-const G_FOLDER: &str = "\u{E8B7}";
-const G_CHECK: &str = "\u{E73E}";
-const G_POWER: &str = "\u{E7E8}";
-const G_EDIT: &str = "\u{E70F}";
-const G_TERM: &str = "\u{E756}";
-const G_ERR: &str = "\u{E783}";
-const G_EXIT: &str = "\u{E8BB}";
-const G_SEARCH: &str = "\u{E721}";
-const G_PLAY: &str = "\u{E768}";
-const G_STOP: &str = "\u{E71A}";
-const G_PIN: &str = "\u{E718}";
-const G_TRASH: &str = "\u{E74D}";
-const G_UPLOAD: &str = "\u{E898}";
-const G_DOWNLOAD: &str = "\u{E896}";
-const G_GLOBE: &str = "\u{E774}";
+pub(crate) const G_CHEV: &str = "\u{E76C}";
+pub(crate) const G_BACK: &str = "\u{E72B}";
+pub(crate) const G_ADD: &str = "\u{E710}";
+pub(crate) const G_GEAR: &str = "\u{E713}";
+pub(crate) const G_CLOSE: &str = "\u{E711}";
+pub(crate) const G_FOLDER: &str = "\u{E8B7}";
+pub(crate) const G_CHECK: &str = "\u{E73E}";
+pub(crate) const G_POWER: &str = "\u{E7E8}";
+pub(crate) const G_EDIT: &str = "\u{E70F}";
+pub(crate) const G_TERM: &str = "\u{E756}";
+pub(crate) const G_ERR: &str = "\u{E783}";
+pub(crate) const G_EXIT: &str = "\u{E8BB}";
+pub(crate) const G_SEARCH: &str = "\u{E721}";
+pub(crate) const G_PLAY: &str = "\u{E768}";
+pub(crate) const G_STOP: &str = "\u{E71A}";
+pub(crate) const G_PIN: &str = "\u{E718}";
+pub(crate) const G_TRASH: &str = "\u{E74D}";
+pub(crate) const G_UPLOAD: &str = "\u{E898}";
+pub(crate) const G_DOWNLOAD: &str = "\u{E896}";
+pub(crate) const G_GLOBE: &str = "\u{E774}";
+pub(crate) const G_SYNC: &str = "\u{E895}";
+pub(crate) const G_LINK: &str = "\u{E71B}";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FilterMode {
+    All,
+    Pinned,
+    GitDirty,
+    RunningServer,
+    FullStack,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ServerRole {
+    Main,
+    Front,
+    Back,
+    Both,
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Hit {
@@ -68,14 +88,20 @@ pub enum Hit {
     Back,
     SearchBox,
     ClearSearch,
+    FilterChip(FilterMode),
+    CloneClipboardRepo,
+    QuickOpenBaseDir,
+    QuickSyncProjects,
     PortBadge(u16),
     PortTerm(u16),
     KillPort(u16),
     Project(usize),
     ProjServer(usize),
+    ProjServerRole(usize, ServerRole),
     ProjServerTerm(usize),
     ProjPort(usize, u16),
     ProjGit(usize),
+    ProjNote(usize),
     ProjTerm(usize),
     ProjExplorer(usize),
     ProjPin(usize),
@@ -109,6 +135,10 @@ pub enum Hit {
     GitDoPull,
     GitOpenRepoWeb,
     GitOpenLogTerm,
+    // Note Modal (Mini-TODO por proyecto)
+    NoteInput,
+    NoteSave,
+    NoteClear,
     // Custom Visual Editor
     EdTab(usize),
     EdField(usize),
@@ -121,26 +151,27 @@ pub enum Hit {
     EdToggleLibDefault(usize),
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum View {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum View {
     Compact,
     Expanded,
     Settings,
     Wizard,
     GitModal,
+    NoteModal,
     CustomEditor,
     Status,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Step {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Step {
     Name,
     Libraries,
     Launcher,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum SKind {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum SKind {
     Opening,
     Done,
     Creating,
@@ -148,17 +179,17 @@ enum SKind {
 }
 
 #[derive(Clone, Copy)]
-struct Spring {
-    x: f32,
-    v: f32,
-    t: f32,
+pub(crate) struct Spring {
+    pub(crate) x: f32,
+    pub(crate) v: f32,
+    pub(crate) t: f32,
 }
 
 impl Spring {
-    fn new(x: f32) -> Self {
+    pub(crate) fn new(x: f32) -> Self {
         Self { x, v: 0.0, t: x }
     }
-    fn step(&mut self, dt: f32, k: f32, d: f32, eps: f32) -> bool {
+    pub(crate) fn step(&mut self, dt: f32, k: f32, d: f32, eps: f32) -> bool {
         let mut rem = dt;
         while rem > 0.0 {
             let h = rem.min(1.0 / 240.0);
@@ -177,99 +208,109 @@ impl Spring {
     }
 }
 
-struct Pending {
-    name: String,
-    stack: String,
-    color: String,
-    launcher: String,
+pub(crate) struct Pending {
+    pub(crate) name: String,
+    pub(crate) stack: String,
+    pub(crate) color: String,
+    pub(crate) launcher: String,
 }
 
 #[derive(Clone, Debug)]
-struct RunningServer {
-    pid: u32,
-    port: Option<u16>,
-    log_path: PathBuf,
+pub(crate) struct RunningServer {
+    pub(crate) pid: u32,
+    pub(crate) port: Option<u16>,
+    pub(crate) log_path: PathBuf,
+    pub(crate) label: String,
+    pub(crate) project_name: String,
 }
 
 pub struct App {
-    hwnd: HWND,
-    gfx: Gfx,
-    cfg: Config,
-    cfg_mtime: Option<SystemTime>,
-    view: View,
-    resume_view: Option<View>,
-    hover: Option<Hit>,
-    hits: RefCell<Vec<(f32, f32, f32, f32, Hit)>>,
-    sw: Spring,
-    sh: Spring,
-    sr: Spring,
-    sa: Spring,
-    last: Instant,
-    timer: bool,
-    tracking: bool,
-    spin: f32,
-    glow_anim: f32,
-    scroll: usize,
-    pos: (i32, i32),
-    visible: bool,
-    auto_hidden_fs: bool,
-    startup: bool,
-    // buscador instantáneo ("Spotlight")
-    search: String,
-    sel_idx: usize,
-    // estado de Git, servidores y ventanas abiertas en tiempo real
-    git_states: HashMap<String, GitInfo>,
-    servers: HashMap<String, RunningServer>,
-    active_ports: Vec<u16>,
-    open_windows: Vec<OpenProjectWindow>,
-    open_scroll: usize,
+    pub(crate) hwnd: HWND,
+    pub(crate) gfx: Gfx,
+    pub(crate) cfg: Config,
+    pub(crate) cfg_mtime: Option<SystemTime>,
+    pub(crate) view: View,
+    pub(crate) resume_view: Option<View>,
+    pub(crate) hover: Option<Hit>,
+    pub(crate) hits: RefCell<Vec<(f32, f32, f32, f32, Hit)>>,
+    pub(crate) sw: Spring,
+    pub(crate) sh: Spring,
+    pub(crate) sr: Spring,
+    pub(crate) sa: Spring,
+    pub(crate) last: Instant,
+    pub(crate) timer: bool,
+    pub(crate) tracking: bool,
+    pub(crate) spin: f32,
+    pub(crate) glow_anim: f32,
+    pub(crate) scroll: usize,
+    pub(crate) pos: (i32, i32),
+    pub(crate) visible: bool,
+    pub(crate) auto_hidden_fs: bool,
+    pub(crate) startup: bool,
+    // buscador instantáneo ("Spotlight") y filtros rápidos por chips
+    pub(crate) search: String,
+    pub(crate) filter_mode: FilterMode,
+    pub(crate) sel_idx: usize,
+    // portapapeles GitHub ("1-Click Clone") y progreso en el borde de la gota
+    pub(crate) clipboard_repo: Option<(String, String)>,
+    pub(crate) bg_progress: Option<f32>,
+    // estado de Git, servidores, combos Full-Stack y ventanas abiertas en tiempo real
+    pub(crate) git_states: HashMap<String, GitInfo>,
+    pub(crate) fullstack_map: HashMap<String, FullStackInfo>,
+    pub(crate) servers: HashMap<String, RunningServer>,
+    pub(crate) active_ports: Vec<u16>,
+    pub(crate) open_windows: Vec<OpenProjectWindow>,
+    pub(crate) open_scroll: usize,
     // asistente de creación
-    step: Step,
-    wiz_name: String,
-    wiz_tpl: usize,
-    wiz_tpl_scroll: usize,
-    wiz_libs: Vec<bool>,
-    wiz_lib_scroll: usize,
-    wiz_launcher: usize,
-    wiz_github: bool,
-    wiz_err: Option<String>,
+    pub(crate) step: Step,
+    pub(crate) wiz_name: String,
+    pub(crate) wiz_tpl: usize,
+    pub(crate) wiz_tpl_scroll: usize,
+    pub(crate) wiz_libs: Vec<bool>,
+    pub(crate) wiz_lib_scroll: usize,
+    pub(crate) wiz_launcher: usize,
+    pub(crate) wiz_github: bool,
+    pub(crate) wiz_err: Option<String>,
     // modal visual de Git & GitHub
-    git_proj_idx: usize,
-    git_commit_msg: String,
-    git_public: bool,
+    pub(crate) git_proj_idx: usize,
+    pub(crate) git_commit_msg: String,
+    pub(crate) git_public: bool,
+    // modal de nota / recordatorio rápido (Mini-TODO)
+    pub(crate) note_proj_idx: usize,
+    pub(crate) note_text: String,
     // editor visual de Librerías, Programas y Frameworks
-    ed_tab: usize, // 0 = Librerías, 1 = Programas, 2 = Frameworks
-    ed_focus: usize,
-    ed_tpl_idx: usize,
-    ed_f1: String,
-    ed_f2: String,
-    ed_f3: String,
-    ed_scroll: usize,
-    ed_msg: Option<(String, bool)>,
+    pub(crate) ed_tab: usize, // 0 = Librerías, 1 = Programas, 2 = Frameworks
+    pub(crate) ed_focus: usize,
+    pub(crate) ed_tpl_idx: usize,
+    pub(crate) ed_f1: String,
+    pub(crate) ed_f2: String,
+    pub(crate) ed_f3: String,
+    pub(crate) ed_scroll: usize,
+    pub(crate) ed_msg: Option<(String, bool)>,
     // estado / notificaciones
-    skind: SKind,
-    s_title: String,
-    s_sub: String,
-    s_color: u32,
-    s_initial: String,
-    s_next: String,
-    s_deadline: Option<Instant>,
-    s_log_path: Option<PathBuf>,
-    s_proj_path: Option<PathBuf>,
-    pending: Option<Pending>,
-    tx: Sender<WorkMsg>,
-    rx: Receiver<WorkMsg>,
-    tray_icon: HICON,
+    pub(crate) skind: SKind,
+    pub(crate) s_title: String,
+    pub(crate) s_sub: String,
+    pub(crate) s_color: u32,
+    pub(crate) s_initial: String,
+    pub(crate) s_next: String,
+    pub(crate) s_deadline: Option<Instant>,
+    pub(crate) s_log_path: Option<PathBuf>,
+    pub(crate) s_proj_path: Option<PathBuf>,
+    pub(crate) pending: Option<Pending>,
+    pub(crate) tx: Sender<WorkMsg>,
+    pub(crate) rx: Receiver<WorkMsg>,
+    pub(crate) tray_icon: HICON,
 }
 
-fn initial(s: &str) -> String {
+pub(crate) fn initial(s: &str) -> String {
     s.chars()
         .find(|c| c.is_alphanumeric())
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or("·".into())
 }
 
-const STACK_PRESETS: &[(&str, &str)] = &[
+pub(crate) const STACK_PRESETS: &[(&str, &str)] = &[
     ("React + Vite", "#3B82F6"),
     ("Next.js", "#71717A"),
     ("Astro", "#FF5D01"),
@@ -314,8 +355,12 @@ impl App {
             auto_hidden_fs: false,
             startup,
             search: String::new(),
+            filter_mode: FilterMode::All,
             sel_idx: 0,
+            clipboard_repo: None,
+            bg_progress: None,
             git_states: HashMap::new(),
+            fullstack_map: HashMap::new(),
             servers: HashMap::new(),
             active_ports: Vec::new(),
             open_windows: Vec::new(),
@@ -332,6 +377,8 @@ impl App {
             git_proj_idx: 0,
             git_commit_msg: String::from("feat: actualización"),
             git_public: false,
+            note_proj_idx: 0,
+            note_text: String::new(),
             ed_tab: 0,
             ed_focus: 0,
             ed_tpl_idx: 0,
@@ -377,12 +424,26 @@ impl App {
         self.kick();
     }
 
-    fn scan_and_sync(&mut self) {
+    pub(crate) fn scan_and_sync(&mut self) {
         let scanned = actions::scan_base_dir(Path::new(&self.cfg.base_dir));
         if self.cfg.sync_scanned_projects(scanned) {
             self.save();
         }
+        // Limpiar estados de proyectos que ya no existan
+        let valid_paths: std::collections::HashSet<String> =
+            self.cfg.projects.iter().map(|p| p.path.to_lowercase()).collect();
+        self.git_states
+            .retain(|k, _| valid_paths.contains(&k.to_lowercase()));
+        self.fullstack_map.clear();
+
         for p in &self.cfg.projects {
+            let fs_info = actions::detect_project_targets(
+                Path::new(&p.path),
+                &p.stack,
+                p.linked_path.as_deref(),
+            );
+            self.fullstack_map.insert(p.path.clone(), fs_info);
+
             if !self.git_states.contains_key(&p.path) {
                 if let Some(branch) = actions::read_git_branch_fast(Path::new(&p.path)) {
                     let remote_url = actions::read_git_remote(Path::new(&p.path));
@@ -400,7 +461,9 @@ impl App {
         }
     }
 
-    fn refresh_live_state(&mut self) {
+    pub(crate) fn refresh_live_state(&mut self) {
+        self.scan_and_sync();
+        self.clipboard_repo = actions::read_clipboard_github_repo(self.hwnd);
         let paths: Vec<String> = self.cfg.projects.iter().map(|p| p.path.clone()).collect();
         let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
         let hw = self.hwnd.0 as isize;
@@ -466,11 +529,16 @@ impl App {
             }
         }
 
-        // 2. Actualizar proyectos abiertos actualmente en editores/programas
-        let new_open = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
-        if new_open != self.open_windows {
-            self.open_windows = new_open;
-            if self.view == View::Expanded {
+        // 2. Si el panel está abierto o en hover, sincronizar carpetas borradas y ventanas abiertas
+        if self.view == View::Expanded || (self.view == View::Compact && self.hov(Hit::Pill)) {
+            let scanned = actions::scan_base_dir(Path::new(&self.cfg.base_dir));
+            if self.cfg.sync_scanned_projects(scanned) {
+                self.save();
+                self.kick();
+            }
+            let new_open = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
+            if new_open != self.open_windows {
+                self.open_windows = new_open;
                 self.kick();
             }
         }
@@ -480,7 +548,7 @@ impl App {
         actions::scan_open_ports(extra_ports, self.tx.clone(), self.hwnd.0 as isize);
     }
 
-    fn active_server_count(&self) -> usize {
+    pub(crate) fn active_server_count(&self) -> usize {
         let mut ports = self.active_ports.clone();
         let mut extra = 0usize;
         for srv in self.servers.values() {
@@ -495,18 +563,40 @@ impl App {
         ports.len() + extra
     }
 
-    fn has_live_server(&self) -> bool {
+    pub(crate) fn has_live_server(&self) -> bool {
         self.active_server_count() > 0
     }
 
-    fn primary_live_port(&self) -> Option<u16> {
+    pub(crate) fn primary_live_port(&self) -> Option<u16> {
         self.servers
             .values()
             .find_map(|s| s.port)
             .or_else(|| self.active_ports.first().copied())
     }
 
-    fn waterdrop_dot_point(cx: f32, w: f32, h: f32, u: f32, dot_r: f32) -> (f32, f32) {
+    pub(crate) fn project_has_running_server(&self, proj_idx: usize) -> bool {
+        let Some(p) = self.cfg.projects.get(proj_idx) else {
+            return false;
+        };
+        if self.servers.contains_key(&p.path) {
+            return true;
+        }
+        if let Some(fs) = self.fullstack_map.get(&p.path) {
+            if let Some(f) = &fs.front {
+                if self.servers.contains_key(&f.cwd.to_string_lossy().to_string()) {
+                    return true;
+                }
+            }
+            if let Some(b) = &fs.back {
+                if self.servers.contains_key(&b.cwd.to_string_lossy().to_string()) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn waterdrop_dot_point(cx: f32, w: f32, h: f32, u: f32, dot_r: f32) -> (f32, f32) {
         let r_cup = (h * 0.46).clamp(8.0, 15.0);
         let cy = (h - r_cup).max(4.0);
         let t = u.abs().clamp(0.0, 1.0);
@@ -535,7 +625,7 @@ impl App {
         (x, y)
     }
 
-    fn waterdrop_dot_positions(cx: f32, w: f32, h: f32, count: usize, dot_r: f32) -> Vec<(f32, f32)> {
+    pub(crate) fn waterdrop_dot_positions(cx: f32, w: f32, h: f32, count: usize, dot_r: f32) -> Vec<(f32, f32)> {
         let us: Vec<f32> = match count {
             0 => Vec::new(),
             1 => vec![0.0],
@@ -555,33 +645,56 @@ impl App {
             .collect()
     }
 
-    fn filtered_projects(&self) -> Vec<usize> {
+    pub(crate) fn filtered_projects(&self) -> Vec<usize> {
         let q = self.search.trim().to_lowercase();
-        if q.is_empty() {
-            (0..self.cfg.projects.len()).collect()
-        } else {
-            self.cfg
-                .projects
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| {
-                    let branch = self
+        self.cfg
+            .projects
+            .iter()
+            .enumerate()
+            .filter(|(idx, p)| {
+                let mode_ok = match self.filter_mode {
+                    FilterMode::All => true,
+                    FilterMode::Pinned => p.pinned,
+                    FilterMode::GitDirty => self
                         .git_states
                         .get(&p.path)
-                        .map(|g| g.branch.to_lowercase())
-                        .unwrap_or_default();
-                    p.name.to_lowercase().contains(&q)
-                        || p.stack.to_lowercase().contains(&q)
-                        || branch.contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect()
-        }
+                        .map(|g| g.dirty)
+                        .unwrap_or(false),
+                    FilterMode::RunningServer => self.project_has_running_server(*idx),
+                    FilterMode::FullStack => self
+                        .fullstack_map
+                        .get(&p.path)
+                        .map(|fs| fs.is_fullstack())
+                        .unwrap_or(false),
+                };
+                if !mode_ok {
+                    return false;
+                }
+                if q.is_empty() {
+                    return true;
+                }
+                let branch = self
+                    .git_states
+                    .get(&p.path)
+                    .map(|g| g.branch.to_lowercase())
+                    .unwrap_or_default();
+                let note = p
+                    .note
+                    .as_deref()
+                    .map(|n| n.to_lowercase())
+                    .unwrap_or_default();
+                p.name.to_lowercase().contains(&q)
+                    || p.stack.to_lowercase().contains(&q)
+                    || branch.contains(&q)
+                    || note.contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     // ---------- ventana / sistema ----------
 
-    fn reposition(&mut self) {
+    pub(crate) fn reposition(&mut self) {
         let mon_rc = actions::target_monitor_rect(&self.cfg.monitor_mode);
         self.pos = (
             mon_rc.left + ((mon_rc.right - mon_rc.left) - self.gfx.wpx) / 2,
@@ -637,7 +750,7 @@ impl App {
         }
     }
 
-    fn quit(&mut self) {
+    pub(crate) fn quit(&mut self) {
         for srv in self.servers.values() {
             actions::stop_dev_server(srv.pid);
         }
@@ -649,14 +762,14 @@ impl App {
         }
     }
 
-    fn focus(&self) {
+    pub(crate) fn focus(&self) {
         unsafe {
             let _ = SetForegroundWindow(self.hwnd);
             let _ = SetFocus(self.hwnd);
         }
     }
 
-    fn set_visible(&mut self, v: bool) {
+    pub(crate) fn set_visible(&mut self, v: bool) {
         self.visible = v;
         self.auto_hidden_fs = false;
         unsafe {
@@ -667,7 +780,7 @@ impl App {
         }
     }
 
-    fn reload_if_changed(&mut self) {
+    pub(crate) fn reload_if_changed(&mut self) {
         let m = config::mtime();
         if m != self.cfg_mtime {
             self.cfg_mtime = m;
@@ -680,14 +793,14 @@ impl App {
         }
     }
 
-    fn save(&mut self) {
+    pub(crate) fn save(&mut self) {
         config::save(&self.cfg);
         self.cfg_mtime = config::mtime();
     }
 
     // ---------- animación ----------
 
-    fn kick(&mut self) {
+    pub(crate) fn kick(&mut self) {
         if !self.timer {
             self.last = Instant::now();
             unsafe {
@@ -698,15 +811,14 @@ impl App {
         self.tick();
     }
 
-    fn target(&self) -> (f32, f32, f32) {
+    pub(crate) fn target(&self) -> (f32, f32, f32) {
         let (w, h, r) = match self.view {
             View::Compact => {
                 if self.hov(Hit::Pill) {
-                    if self.has_live_server() {
-                        (96.0, 24.0, 12.0)
-                    } else {
-                        (78.0, 24.0, 12.0)
-                    }
+                    // Modo "Pre-vista en Píldora" (Estilo iPhone 16 Pro) al pasar el ratón por la gota
+                    (244.0, 32.0, 16.0)
+                } else if self.bg_progress.is_some() {
+                    (66.0, 13.0, 6.5)
                 } else if self.has_live_server() {
                     (54.0, 10.0, 5.0)
                 } else {
@@ -715,11 +827,11 @@ impl App {
             }
             View::Expanded => {
                 let filtered_len = self.filtered_projects().len();
-                let open_len = self.open_windows.len();
-                let n = filtered_len.clamp(1, MAX_ROWS).max(open_len.min(MAX_ROWS)) as f32;
+                let n = filtered_len.clamp(3, MAX_ROWS) as f32;
                 let ports_bar = if self.active_ports.is_empty() { 0.0 } else { 32.0 };
-                let search_bar = 44.0;
-                (784.0, 64.0 + ports_bar + search_bar + n * 54.0 + 54.0 + 18.0, 26.0)
+                let search_bar = 42.0;
+                let chips_bar = 30.0;
+                (796.0, 64.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
             View::Settings => (548.0, 64.0 + 9.0 * 48.0 + 38.0, 26.0),
             View::Wizard => {
@@ -731,6 +843,7 @@ impl App {
                 (548.0, 64.0 + rows + 68.0, 26.0)
             }
             View::GitModal => (548.0, 340.0, 26.0),
+            View::NoteModal => (520.0, 252.0, 26.0),
             View::CustomEditor => (548.0, 495.0, 26.0),
             View::Status => {
                 if self.skind == SKind::Creating || self.skind == SKind::Error {
@@ -793,13 +906,13 @@ impl App {
         }
     }
 
-    fn fade(&mut self) {
+    pub(crate) fn fade(&mut self) {
         self.sa.x = 0.0;
         self.sa.v = 0.0;
     }
 
     /// Cambia la vista activa sin destruir el progreso de creación, búsqueda o formularios.
-    fn set_view(&mut self, v: View) {
+    pub(crate) fn set_view(&mut self, v: View) {
         if v == self.view {
             return;
         }
@@ -811,7 +924,12 @@ impl App {
         }
         if matches!(
             v,
-            View::Expanded | View::Settings | View::Wizard | View::GitModal | View::CustomEditor
+            View::Expanded
+                | View::Settings
+                | View::Wizard
+                | View::GitModal
+                | View::NoteModal
+                | View::CustomEditor
         ) {
             self.focus();
         } else if v == View::Compact {
@@ -831,10 +949,15 @@ impl App {
     }
 
     /// Minimiza la isla a la gota guardando la vista actual para restaurarla intacta al volver a abrirla.
-    fn minimize_preserving_state(&mut self) {
+    pub(crate) fn minimize_preserving_state(&mut self) {
         if matches!(
             self.view,
-            View::Expanded | View::Settings | View::Wizard | View::GitModal | View::CustomEditor
+            View::Expanded
+                | View::Settings
+                | View::Wizard
+                | View::GitModal
+                | View::NoteModal
+                | View::CustomEditor
         ) {
             self.resume_view = Some(self.view);
         }
@@ -842,29 +965,31 @@ impl App {
     }
 
     /// Restaura la última vista en la que estaba trabajando el usuario (o `View::Expanded` por defecto).
-    fn reopen_preserved_view(&mut self) {
+    pub(crate) fn reopen_preserved_view(&mut self) {
         let target = self.resume_view.take().unwrap_or(View::Expanded);
         self.set_view(target);
     }
 
-    // ---------- dibujo ----------
+    // ---------- hit-testing y render ----------
 
-    fn hit(&self, x: f32, y: f32, w: f32, h: f32, id: Hit) {
+    pub(crate) fn hit(&self, x: f32, y: f32, w: f32, h: f32, id: Hit) {
         self.hits.borrow_mut().push((x, y, w, h, id));
     }
 
-    fn hov(&self, id: Hit) -> bool {
+    pub(crate) fn hov(&self, id: Hit) -> bool {
         self.hover == Some(id)
     }
 
-    fn is_row_hov(&self, i: usize) -> bool {
+    pub(crate) fn is_row_hov(&self, i: usize) -> bool {
         matches!(
             self.hover,
             Some(Hit::Project(k))
                 | Some(Hit::ProjServer(k))
+                | Some(Hit::ProjServerRole(k, _))
                 | Some(Hit::ProjServerTerm(k))
                 | Some(Hit::ProjPort(k, _))
                 | Some(Hit::ProjGit(k))
+                | Some(Hit::ProjNote(k))
                 | Some(Hit::ProjTerm(k))
                 | Some(Hit::ProjExplorer(k))
                 | Some(Hit::ProjPin(k))
@@ -872,7 +997,7 @@ impl App {
         )
     }
 
-    fn hit_at(&self, x: f32, y: f32) -> Option<Hit> {
+    pub(crate) fn hit_at(&self, x: f32, y: f32) -> Option<Hit> {
         self.hits
             .borrow()
             .iter()
@@ -891,776 +1016,7 @@ impl App {
         self.gfx.present(self.hwnd, x, y);
     }
 
-    fn draw(&self) {
-        let g = &self.gfx;
-        let (w, h, r) = (self.sw.x.max(30.0), self.sh.x.max(8.0), self.sr.x.max(3.0));
-        let cx = WIN_W / 2.0;
-        let y = TOP;
-        g.alpha.set(1.0);
-
-        if self.view == View::Compact {
-            let is_hov = self.hov(Hit::Pill);
-            if let Ok(sp) = g.waterdrop_path(cx, w + 4.0, h + 3.0) {
-                g.fill_path(&sp, 0x000000, 0.35);
-            }
-            if let Ok(sp2) = g.waterdrop_path(cx, w + 8.0, h + 6.0) {
-                g.fill_path(&sp2, 0x000000, 0.15);
-            }
-
-            if let Ok(notch) = g.waterdrop_path(cx, w, h) {
-                g.fill_path(&notch, BODY, 1.0);
-            }
-
-            let pulse = if is_hov {
-                0.70 + 0.30 * self.glow_anim.sin()
-            } else if self.glow_anim > 0.0 {
-                self.glow_anim * 0.7
-            } else {
-                0.0
-            };
-            g.draw_glow_ring(cx, w, h, pulse);
-
-            if let Ok(curve) = g.waterdrop_curve_path(cx, w, h) {
-                let stroke_alpha = if is_hov { 0.85 } else { 0.18 };
-                g.stroke_path(&curve, WHITE, stroke_alpha, 1.2);
-            }
-
-            let srv_count = self.active_server_count();
-            if srv_count > 0 {
-                if is_hov && h > 16.0 {
-                    let port_txt = if srv_count == 1 {
-                        self.primary_live_port()
-                            .map(|p| format!(":{p}"))
-                            .unwrap_or_else(|| "1 LIVE".into())
-                    } else {
-                        format!("{srv_count} LIVE")
-                    };
-                    g.text(&port_txt, &g.f.small_c, cx - 28.0, 1.0, 56.0, h - 4.0, GREEN, 0.95);
-                }
-                let dot_r = 3.0;
-                for (dx, dy) in Self::waterdrop_dot_positions(cx, w, h, srv_count, dot_r) {
-                    g.circle(dx, dy, dot_r + 1.8, GREEN, 0.25);
-                    g.circle(dx, dy, dot_r + 0.8, 0x000000, 0.75);
-                    g.circle(dx, dy, dot_r, GREEN, 1.0);
-                }
-            }
-
-            self.hit(cx - w * 0.5, 0.0, w, h + 6.0, Hit::Pill);
-        } else {
-            let x = cx - w / 2.0;
-            for i in 0..8 {
-                let e = i as f32 * 2.0;
-                let alpha = 0.04 * (1.0 - i as f32 / 8.0);
-                if let Ok(sp) = g.top_panel_path(x - e, w + e * 2.0, h + e * 1.5, r + e) {
-                    g.fill_path(&sp, 0x000000, alpha);
-                }
-            }
-            if let Ok(panel) = g.top_panel_path(x, w, h, r) {
-                g.fill_path(&panel, BODY, 0.98);
-            }
-            if let Ok(panel_curve) = g.top_panel_curve_path(x, w, h, r) {
-                g.stroke_path(&panel_curve, WHITE, 0.12, 1.0);
-            }
-
-            g.clip(x, y, w, h);
-            g.alpha.set(self.sa.x.clamp(0.0, 1.0));
-            let (tw, th, _) = self.target();
-            let lx = WIN_W / 2.0 - tw / 2.0;
-            match self.view {
-                View::Compact => {}
-                View::Expanded => self.draw_expanded(lx, y, tw),
-                View::Settings => self.draw_settings(lx, y, tw),
-                View::Wizard => self.draw_wizard(lx, y, tw, th),
-                View::GitModal => self.draw_git_modal(lx, y, tw, th),
-                View::CustomEditor => self.draw_custom_editor(lx, y, tw, th),
-                View::Status => self.draw_status(lx, y, tw, h),
-            }
-            self.draw_tooltip(lx, y, tw, h);
-            g.alpha.set(1.0);
-            g.unclip();
-        }
-    }
-
-    fn icon_btn(&self, x: f32, y: f32, s: f32, glyph: &str, id: Hit) {
-        let g = &self.gfx;
-        let hv = self.hov(id);
-        if hv {
-            g.circle(x + s / 2.0, y + s / 2.0, s / 2.0, WHITE, 0.1);
-        }
-        g.text(glyph, &g.f.icon_sm, x, y, s, s, if hv { WHITE } else { GRAY }, 1.0);
-        self.hit(x, y, s, s, id);
-    }
-
-    fn mini_action_btn(&self, x: f32, y: f32, s: f32, glyph: &str, color: u32, active: bool, id: Hit) {
-        let g = &self.gfx;
-        let hv = self.hov(id);
-        let bg_alpha = if hv { 0.20 } else if active { 0.12 } else { 0.06 };
-        g.rrect(x, y, s, s, 7.0, WHITE, bg_alpha);
-        if hv || active {
-            g.rrect_stroke(x + 0.5, y + 0.5, s - 1.0, s - 1.0, 7.0, color, 0.50, 1.0);
-        }
-        let fg = if hv || active { color } else { GRAY };
-        g.text(glyph, &g.f.icon_sm, x, y, s, s, fg, 1.0);
-        self.hit(x, y, s, s, id);
-    }
-
-    fn pill_action_btn(&self, x: f32, y: f32, w: f32, h: f32, label: &str, color: u32, active: bool, id: Hit) {
-        let g = &self.gfx;
-        let hv = self.hov(id);
-        let bg_a = if hv { 0.22 } else if active { 0.13 } else { 0.06 };
-        g.rrect(x, y, w, h, 7.0, if active || hv { color } else { WHITE }, bg_a);
-        g.rrect_stroke(
-            x + 0.5,
-            y + 0.5,
-            w - 1.0,
-            h - 1.0,
-            7.0,
-            if active || hv { color } else { BORDER },
-            if active || hv { 0.55 } else { 0.7 },
-            1.0,
-        );
-        let fg = if active || hv { color } else { GRAY };
-        g.text(label, &g.f.small_c, x, y, w, h, fg, 1.0);
-        self.hit(x, y, w, h, id);
-    }
-
-    fn chip(&self, x: f32, y: f32, w: f32, s: &str) {
-        let g = &self.gfx;
-        g.rrect(x, y, w, 22.0, 6.0, WHITE, 0.07);
-        g.text(s, &g.f.small_c, x, y, w, 22.0, GRAY, 1.0);
-    }
-
-    fn header(&self, lx: f32, y: f32, tw: f32, title: &str, sub: &str, back: bool) {
-        let g = &self.gfx;
-        if back {
-            self.icon_btn(lx + 16.0, y + 16.0, 32.0, G_BACK, Hit::Back);
-        } else {
-            g.draw_logo(lx + 16.0, y + 14.0, 36.0, 36.0, 1.0);
-        }
-        g.text(title, &g.f.title, lx + 62.0, y + 13.0, tw - 160.0, 20.0, WHITE, 1.0);
-        g.text(sub, &g.f.sub, lx + 62.0, y + 32.0, tw - 160.0, 18.0, GRAY, 1.0);
-        if !back {
-            self.icon_btn(lx + tw - 86.0, y + 16.0, 32.0, G_GEAR, Hit::Settings);
-        }
-        self.icon_btn(lx + tw - 48.0, y + 16.0, 32.0, G_CLOSE, Hit::Close);
-        g.line(lx + 16.0, y + 63.5, lx + tw - 16.0, y + 63.5, WHITE, 0.08, 1.0);
-    }
-
-    fn count_text(&self) -> String {
-        let mut parts = Vec::new();
-        parts.push(match self.cfg.projects.len() {
-            0 => "Sin proyectos aún".into(),
-            1 => "1 proyecto".into(),
-            n => format!("{n} proyectos"),
-        });
-        let open_cnt = self.open_windows.len();
-        if open_cnt > 0 {
-            parts.push(format!(
-                "{open_cnt} abierto{}",
-                if open_cnt == 1 { "" } else { "s" }
-            ));
-        }
-        let active_cnt = self.active_server_count();
-        if active_cnt > 0 {
-            parts.push(format!(
-                "{active_cnt} servidor{} activo{}",
-                if active_cnt == 1 { "" } else { "es" },
-                if active_cnt == 1 { "" } else { "s" }
-            ));
-        }
-        parts.join(" · ")
-    }
-
-    fn tooltip_for_hit(&self, h: Hit) -> Option<String> {
-        match h {
-            Hit::Settings => Some("Ajustes y configuración".into()),
-            Hit::Close => Some("Minimizar isla (Esc)".into()),
-            Hit::Back => Some("Volver atrás (Esc)".into()),
-            Hit::ClearSearch => Some("Limpiar búsqueda".into()),
-            Hit::PortBadge(port) | Hit::ProjPort(_, port) => {
-                Some(format!("Abrir http://localhost:{port} en el navegador"))
-            }
-            Hit::PortTerm(port) => Some(format!("Ver terminal del servidor en :{port}")),
-            Hit::KillPort(port) => Some(format!("Detener proceso que ocupa el puerto :{port}")),
-            Hit::ProjServer(i) => {
-                let p = self.cfg.projects.get(i)?;
-                if self.servers.contains_key(&p.path) {
-                    Some("Detener servidor local".into())
-                } else {
-                    Some("Iniciar servidor local (npm run dev)".into())
-                }
-            }
-            Hit::ProjServerTerm(_) => Some("Ver terminal del servidor en vivo".into()),
-            Hit::ProjGit(i) => {
-                let p = self.cfg.projects.get(i)?;
-                if let Some(g) = self.git_states.get(&p.path) {
-                    if g.dirty {
-                        Some(format!(
-                            "Git & GitHub · {} cambios sin guardar (Commit / Push)",
-                            g.changed_count
-                        ))
-                    } else if g.remote_url.is_some() {
-                        Some(format!("Git & GitHub (rama ⎇ {}) · Commit, Push o Pull", g.branch))
-                    } else {
-                        Some(format!("Subir '{}' a GitHub o hacer Commit", p.name))
-                    }
-                } else {
-                    Some(format!("Inicializar Git y subir '{}' a GitHub", p.name))
-                }
-            }
-            Hit::ProjTerm(i) => {
-                let p = self.cfg.projects.get(i)?;
-                Some(format!("Abrir Terminal en {}", p.name))
-            }
-            Hit::ProjExplorer(i) => {
-                let p = self.cfg.projects.get(i)?;
-                Some(format!("Abrir carpeta '{}' en el Explorador", p.name))
-            }
-            Hit::ProjPin(i) => {
-                let p = self.cfg.projects.get(i)?;
-                if p.pinned {
-                    Some("Desfijar proyecto".into())
-                } else {
-                    Some("Fijar proyecto arriba en favoritos".into())
-                }
-            }
-            Hit::OpenWinFocus(idx) => {
-                let w = self.open_windows.get(idx)?;
-                Some(format!("Saltar a ventana abierta en {}", w.program_name))
-            }
-            Hit::OpenWinClose(idx) => {
-                let w = self.open_windows.get(idx)?;
-                Some(format!("Cerrar ventana de {} ({})", w.project_name, w.program_name))
-            }
-            Hit::EdDeleteItem(_) => Some("Eliminar elemento".into()),
-            _ => None,
-        }
-    }
-
-    fn draw_tooltip(&self, lx: f32, y: f32, tw: f32, panel_h: f32) {
-        let Some(hov) = self.hover else { return };
-        let Some(label) = self.tooltip_for_hit(hov) else { return };
-        let rect = self
-            .hits
-            .borrow()
-            .iter()
-            .rev()
-            .find(|h| h.4 == hov)
-            .copied();
-        let Some((hx, hy, hw, hh, _)) = rect else { return };
-
-        let g = &self.gfx;
-        let tip_w = (g.measure(&label, &g.f.small_c) + 20.0).clamp(72.0, tw - 24.0);
-        let tip_h = 24.0;
-        let mut tx = hx + hw * 0.5 - tip_w * 0.5;
-        tx = tx.clamp(lx + 10.0, lx + tw - tip_w - 10.0);
-        let mut ty = hy - tip_h - 6.0;
-        if ty < y + 8.0 {
-            ty = (hy + hh + 6.0).min(y + panel_h - tip_h - 6.0);
-        }
-
-        g.rrect(tx - 1.0, ty + 2.0, tip_w + 2.0, tip_h + 2.0, 7.0, 0x000000, 0.65);
-        g.rrect(tx, ty, tip_w, tip_h, 7.0, 0x18181B, 0.98);
-        g.rrect_stroke(tx + 0.5, ty + 0.5, tip_w - 1.0, tip_h - 1.0, 7.0, WHITE, 0.35, 1.0);
-        g.text(&label, &g.f.small_c, tx + 6.0, ty, tip_w - 12.0, tip_h, WHITE, 1.0);
-    }
-
-    fn row_bg(&self, lx: f32, ry: f32, tw: f32, h: f32, id: Hit, selected: bool) {
-        let g = &self.gfx;
-        let is_hov = match id {
-            Hit::Project(i) => self.is_row_hov(i),
-            _ => self.hov(id),
-        };
-        if selected {
-            g.rrect(lx + 8.0, ry + 2.0, tw - 16.0, h - 4.0, 12.0, CARD_HOV, 1.0);
-            g.rrect_stroke(lx + 8.5, ry + 2.5, tw - 17.0, h - 5.0, 12.0, WHITE, 0.45, 1.0);
-        } else if is_hov {
-            g.rrect(lx + 8.0, ry + 2.0, tw - 16.0, h - 4.0, 12.0, CARD_HOV, 1.0);
-            g.rrect_stroke(lx + 8.5, ry + 2.5, tw - 17.0, h - 5.0, 12.0, BORDER, 0.85, 1.0);
-        } else {
-            g.rrect(lx + 8.0, ry + 2.0, tw - 16.0, h - 4.0, 12.0, CARD, 0.6);
-            g.rrect_stroke(lx + 8.5, ry + 2.5, tw - 17.0, h - 5.0, 12.0, BORDER, 0.4, 1.0);
-        }
-        self.hit(lx + 8.0, ry + 2.0, tw - 16.0, h - 4.0, id);
-    }
-
-    fn draw_expanded(&self, lx: f32, y: f32, tw: f32) {
-        let g = &self.gfx;
-        self.header(lx, y, tw, "Mis Proyectos", &self.count_text(), false);
-        let mut ry = y + 66.0;
-
-        // 1. Barra de puertos locales activos (abrir en navegador, ir a su terminal o matar proceso)
-        if !self.active_ports.is_empty() {
-            g.circle(lx + 20.0, ry + 13.0, 3.5, GREEN, 1.0);
-            g.text("PUERTOS:", &g.f.small_c, lx + 26.0, ry + 2.0, 62.0, 22.0, GRAY, 1.0);
-            let mut px = lx + 92.0;
-            for &port in self.active_ports.iter().take(4) {
-                let pw = 94.0;
-                let hv_open = self.hov(Hit::PortBadge(port));
-                let hv_term = self.hov(Hit::PortTerm(port));
-                let hv_kill = self.hov(Hit::KillPort(port));
-                g.rrect(px, ry + 2.0, pw, 22.0, 6.0, GREEN, if hv_open { 0.22 } else { 0.12 });
-                g.rrect_stroke(px + 0.5, ry + 2.5, pw - 1.0, 21.0, 6.0, GREEN, 0.45, 1.0);
-                g.text(&format!(":{port}"), &g.f.small_c, px + 4.0, ry + 2.0, pw - 40.0, 22.0, GREEN, 1.0);
-                self.hit(px, ry + 2.0, pw - 40.0, 22.0, Hit::PortBadge(port));
-
-                if hv_term {
-                    g.rrect(px + pw - 38.0, ry + 4.0, 18.0, 18.0, 4.0, GREEN, 0.32);
-                }
-                g.text(
-                    G_TERM,
-                    &g.f.icon_sm,
-                    px + pw - 38.0,
-                    ry + 2.0,
-                    18.0,
-                    22.0,
-                    if hv_term { WHITE } else { GREEN },
-                    1.0,
-                );
-                self.hit(px + pw - 38.0, ry + 2.0, 19.0, 22.0, Hit::PortTerm(port));
-
-                if hv_kill {
-                    g.rrect(px + pw - 19.0, ry + 4.0, 17.0, 18.0, 4.0, RED, 0.35);
-                }
-                g.text(
-                    G_CLOSE,
-                    &g.f.icon_sm,
-                    px + pw - 19.0,
-                    ry + 2.0,
-                    17.0,
-                    22.0,
-                    if hv_kill { RED } else { GRAY },
-                    1.0,
-                );
-                self.hit(px + pw - 19.0, ry + 2.0, 19.0, 22.0, Hit::KillPort(port));
-                px += pw + 6.0;
-            }
-            ry += 30.0;
-        }
-
-        // 2. Buscador Instantáneo ("Spotlight" dentro de la Isla)
-        let sbx = lx + 10.0;
-        let sbw = tw - 20.0;
-        let sbh = 36.0;
-        let has_q = !self.search.is_empty();
-        g.rrect(sbx, ry + 2.0, sbw, sbh, 10.0, WHITE, if has_q { 0.08 } else { 0.04 });
-        g.rrect_stroke(
-            sbx + 0.5,
-            ry + 2.5,
-            sbw - 1.0,
-            sbh - 1.0,
-            10.0,
-            if has_q { WHITE } else { BORDER },
-            if has_q { 0.45 } else { 0.7 },
-            1.0,
-        );
-        g.text(G_SEARCH, &g.f.icon_sm, sbx + 10.0, ry + 2.0, 24.0, sbh, if has_q { WHITE } else { DIM }, 1.0);
-        if self.search.is_empty() {
-            g.text(
-                "Buscar proyecto, tecnología o rama… (escribe directo o arrastra una carpeta a la isla)",
-                &g.f.sub,
-                sbx + 36.0,
-                ry + 2.0,
-                sbw - 48.0,
-                sbh,
-                DIM,
-                1.0,
-            );
-        } else {
-            g.text(&self.search, &g.f.body, sbx + 36.0, ry + 2.0, sbw - 70.0, sbh, WHITE, 1.0);
-            let cur_x = (sbx + 36.0 + g.measure(&self.search, &g.f.body) + 1.5).min(sbx + sbw - 36.0);
-            g.line(cur_x, ry + 11.0, cur_x, ry + 29.0, WHITE, 0.9, 1.4);
-            self.icon_btn(sbx + sbw - 32.0, ry + 6.0, 28.0, G_CLOSE, Hit::ClearSearch);
-        }
-        self.hit(sbx, ry + 2.0, sbw - 34.0, sbh, Hit::SearchBox);
-        ry += 44.0;
-
-        // 3. Diseño a dos columnas: Izquierda = Mis Proyectos | Derecha = Abiertos ahora
-        let body_top = ry;
-        let left_w = 504.0;
-        let filtered = self.filtered_projects();
-        if filtered.is_empty() {
-            let msg = if self.cfg.projects.is_empty() {
-                "Crea uno nuevo o agrega uno existente en Ajustes"
-            } else {
-                "No hay proyectos que coincidan con tu búsqueda"
-            };
-            g.text(msg, &g.f.sub, lx + 20.0, ry, left_w - 36.0, 54.0, DIM, 1.0);
-            ry += 54.0;
-        }
-
-        let max_scroll = filtered.len().saturating_sub(MAX_ROWS);
-        let cur_scroll = self.scroll.min(max_scroll);
-
-        for (vis_idx, &proj_idx) in filtered.iter().enumerate().skip(cur_scroll).take(MAX_ROWS) {
-            let Some(p) = self.cfg.projects.get(proj_idx) else { continue };
-            let id = Hit::Project(proj_idx);
-            let is_kbd_sel = !self.search.is_empty() && vis_idx == self.sel_idx.min(filtered.len().saturating_sub(1));
-            self.row_bg(lx, ry, left_w, 54.0, id, is_kbd_sel);
-
-            g.draw_stack_badge(&p.stack, lx + 18.0, ry + 9.0, 36.0);
-
-            let srv_state = self.servers.get(&p.path);
-            let right_reserve = if srv_state.is_some() { 246.0 } else { 164.0 };
-            let title_x = lx + 62.0;
-            let max_title_w = (left_w - 62.0 - right_reserve).max(90.0);
-            let display_name = if p.pinned {
-                format!("📌 {}", p.name)
-            } else {
-                p.name.clone()
-            };
-            g.text(&display_name, &g.f.title, title_x, ry + 7.0, max_title_w, 20.0, WHITE, 1.0);
-
-            let git_opt = self.git_states.get(&p.path);
-            let open_in = self
-                .open_windows
-                .iter()
-                .find(|w| w.project_idx == proj_idx && w.is_ide)
-                .or_else(|| self.open_windows.iter().find(|w| w.project_idx == proj_idx));
-
-            let mut sub_parts = vec![p.stack.clone()];
-            if let Some(git) = git_opt {
-                sub_parts.push(format!("⎇ {}", git.branch));
-            }
-            if let Some(ow) = open_in {
-                sub_parts.push(format!("● {}", ow.program_name));
-            }
-            let sub_txt = sub_parts.join(" · ");
-            g.text(
-                &sub_txt,
-                &g.f.sub,
-                title_x,
-                ry + 27.0,
-                max_title_w + 14.0,
-                18.0,
-                if open_in.is_some() { GREEN } else { GRAY },
-                1.0,
-            );
-
-            // Controles compactos de icono a la derecha de cada fila (con tooltip al pasar el ratón)
-            let mut bx = lx + left_w - 38.0;
-            // 1. Fijar arriba (Pin)
-            self.mini_action_btn(bx, ry + 14.0, 26.0, G_PIN, WHITE, p.pinned, Hit::ProjPin(proj_idx));
-            bx -= 29.0;
-            // 2. Abrir en Explorador
-            self.mini_action_btn(bx, ry + 14.0, 26.0, G_FOLDER, WHITE, false, Hit::ProjExplorer(proj_idx));
-            bx -= 29.0;
-            // 3. Abrir Terminal en carpeta
-            self.mini_action_btn(bx, ry + 14.0, 26.0, G_TERM, WHITE, false, Hit::ProjTerm(proj_idx));
-            bx -= 29.0;
-
-            // 4. Botón compacto de Git / GitHub (26×26 con punto ámbar si hay cambios pendientes)
-            let git_dirty = git_opt.map(|g| g.dirty).unwrap_or(false);
-            let has_git = git_opt.is_some();
-            self.mini_action_btn(
-                bx,
-                ry + 14.0,
-                26.0,
-                "⎇",
-                if git_dirty { AMBER } else { WHITE },
-                git_dirty || has_git,
-                Hit::ProjGit(proj_idx),
-            );
-            if git_dirty {
-                g.circle(bx + 22.0, ry + 17.0, 3.2, AMBER, 1.0);
-            }
-
-            // 5. Controles de Servidor en Vivo (Play / Puerto + Terminal de servidor + Stop)
-            let has_dev = actions::detect_dev_command(Path::new(&p.path), &p.stack).is_some();
-
-            if let Some(srv) = srv_state {
-                bx -= 29.0;
-                self.mini_action_btn(bx, ry + 14.0, 26.0, G_STOP, RED, true, Hit::ProjServer(proj_idx));
-
-                bx -= 29.0;
-                self.mini_action_btn(bx, ry + 14.0, 26.0, G_TERM, GREEN, true, Hit::ProjServerTerm(proj_idx));
-
-                let port_num = srv.port.unwrap_or(0);
-                let badge_w = 54.0;
-                bx -= badge_w + 4.0;
-                let hv_p = self.hov(Hit::ProjPort(proj_idx, port_num));
-                g.rrect(bx, ry + 14.0, badge_w, 26.0, 7.0, GREEN, if hv_p { 0.25 } else { 0.14 });
-                g.rrect_stroke(bx + 0.5, ry + 14.5, badge_w - 1.0, 25.0, 7.0, GREEN, 0.55, 1.0);
-                let p_lbl = if port_num > 0 {
-                    format!("● :{port_num}")
-                } else {
-                    "● ...".into()
-                };
-                g.text(&p_lbl, &g.f.small_c, bx, ry + 14.0, badge_w, 26.0, GREEN, 1.0);
-                if port_num > 0 {
-                    self.hit(bx, ry + 14.0, badge_w, 26.0, Hit::ProjPort(proj_idx, port_num));
-                } else {
-                    self.hit(bx, ry + 14.0, badge_w, 26.0, Hit::ProjServerTerm(proj_idx));
-                }
-            } else if has_dev {
-                bx -= 29.0;
-                self.mini_action_btn(bx, ry + 14.0, 26.0, G_PLAY, GREEN, false, Hit::ProjServer(proj_idx));
-            }
-
-            ry += 54.0;
-        }
-
-        let id = Hit::NewProject;
-        self.row_bg(lx, ry + 4.0, left_w, 54.0, id, false);
-        g.rrect(lx + 18.0, ry + 13.0, 36.0, 36.0, 10.0, WHITE, 0.08);
-        g.text(G_ADD, &g.f.icon_sm, lx + 18.0, ry + 13.0, 36.0, 36.0, WHITE, 1.0);
-        g.text(
-            "Crear nuevo proyecto",
-            &g.f.title,
-            lx + 62.0,
-            ry + 4.0,
-            left_w - 150.0,
-            54.0,
-            WHITE,
-            1.0,
-        );
-        self.chip(lx + left_w - 72.0, ry + 20.0, 54.0, "Ctrl N");
-
-        // 4. Columna Derecha: "ABIERTOS AHORA" (Proyectos abiertos actualmente y en qué programa)
-        let div_x = lx + left_w + 4.0;
-        let body_bottom = (ry + 56.0).max(body_top + 120.0);
-        g.line(div_x, body_top + 4.0, div_x, body_bottom, WHITE, 0.08, 1.0);
-
-        let rx = div_x + 8.0;
-        let rw = tw - (left_w + 22.0);
-        let mut ory = body_top + 2.0;
-
-        let open_cnt = self.open_windows.len();
-        g.circle(
-            rx + 8.0,
-            ory + 11.0,
-            3.5,
-            if open_cnt > 0 { GREEN } else { DIM },
-            1.0,
-        );
-        g.text(
-            &format!("ABIERTOS AHORA ({open_cnt})"),
-            &g.f.sub,
-            rx + 18.0,
-            ory,
-            rw - 20.0,
-            22.0,
-            if open_cnt > 0 { WHITE } else { GRAY },
-            1.0,
-        );
-        ory += 26.0;
-
-        if self.open_windows.is_empty() {
-            let empty_h = (body_bottom - ory).max(84.0);
-            g.rrect(rx, ory + 2.0, rw, empty_h - 4.0, 12.0, CARD, 0.45);
-            g.rrect_stroke(rx + 0.5, ory + 2.5, rw - 1.0, empty_h - 5.0, 12.0, BORDER, 0.4, 1.0);
-            g.text(
-                "Ningún proyecto abierto",
-                &g.f.body,
-                rx + 14.0,
-                ory + 14.0,
-                rw - 28.0,
-                20.0,
-                GRAY,
-                1.0,
-            );
-            g.text(
-                "Al abrir un proyecto en Antigravity, VS Code o Explorador aparecerá aquí para saltar sin abrir otra ventana.",
-                &g.f.sub,
-                rx + 14.0,
-                ory + 36.0,
-                rw - 28.0,
-                empty_h - 42.0,
-                DIM,
-                1.0,
-            );
-        } else {
-            let max_vis = MAX_ROWS;
-            let max_osc = self.open_windows.len().saturating_sub(max_vis);
-            let osc = self.open_scroll.min(max_osc);
-            for (idx, ow) in self.open_windows.iter().enumerate().skip(osc).take(max_vis) {
-                let hv_card = self.hov(Hit::OpenWinFocus(idx)) || self.hov(Hit::OpenWinClose(idx));
-                g.rrect(
-                    rx,
-                    ory + 2.0,
-                    rw,
-                    48.0,
-                    11.0,
-                    if hv_card { CARD_HOV } else { CARD },
-                    if hv_card { 1.0 } else { 0.72 },
-                );
-                g.rrect_stroke(
-                    rx + 0.5,
-                    ory + 2.5,
-                    rw - 1.0,
-                    47.0,
-                    11.0,
-                    if hv_card { GREEN } else { BORDER },
-                    if hv_card { 0.55 } else { 0.5 },
-                    1.0,
-                );
-                self.hit(rx, ory + 2.0, rw - 30.0, 48.0, Hit::OpenWinFocus(idx));
-
-                g.draw_stack_badge(&ow.stack, rx + 10.0, ory + 10.0, 30.0);
-                g.text(
-                    &ow.project_name,
-                    &g.f.body,
-                    rx + 48.0,
-                    ory + 7.0,
-                    rw - 82.0,
-                    18.0,
-                    WHITE,
-                    1.0,
-                );
-                g.text(
-                    &format!("● {}", ow.program_name),
-                    &g.f.sub,
-                    rx + 48.0,
-                    ory + 25.0,
-                    rw - 82.0,
-                    18.0,
-                    if ow.is_ide { GREEN } else { GRAY },
-                    1.0,
-                );
-
-                // Botón × para cerrar esa ventana si se desea
-                let cx_btn = rx + rw - 28.0;
-                let cy_btn = ory + 15.0;
-                let hv_close = self.hov(Hit::OpenWinClose(idx));
-                if hv_close {
-                    g.rrect(cx_btn, cy_btn, 22.0, 22.0, 6.0, RED, 0.28);
-                }
-                g.text(
-                    G_CLOSE,
-                    &g.f.icon_sm,
-                    cx_btn,
-                    cy_btn,
-                    22.0,
-                    22.0,
-                    if hv_close { RED } else { GRAY },
-                    1.0,
-                );
-                self.hit(cx_btn, cy_btn, 22.0, 22.0, Hit::OpenWinClose(idx));
-
-                ory += 52.0;
-            }
-        }
-    }
-
-    fn monitor_label(&self) -> String {
-        match self.cfg.monitor_mode.as_str() {
-            "cursor" => "Seguir cursor".into(),
-            s if s.starts_with("monitor:") => {
-                let n = s.trim_start_matches("monitor:").parse::<usize>().unwrap_or(0) + 1;
-                format!("Monitor {n}")
-            }
-            _ => "Principal".into(),
-        }
-    }
-
-    fn draw_settings(&self, lx: f32, y: f32, tw: f32) {
-        let g = &self.gfx;
-        self.header(lx, y, tw, "Ajustes", "Configuración de Isla Dev", true);
-        let launcher = self
-            .cfg
-            .launcher(&self.cfg.default_launcher)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
-        let mon_lbl = self.monitor_label();
-        let items: [(&str, &str, Hit); 9] = [
-            (G_POWER, "Mostrar isla en pantalla", Hit::ToggleVisibility),
-            (G_POWER, "Ocultar en pantalla completa (Juegos / Video)", Hit::ToggleFullscreenHide),
-            (G_GLOBE, "Monitor de la isla", Hit::CycleMonitor),
-            (G_POWER, "Iniciar con Windows", Hit::Startup),
-            (G_TERM, "Abrir con (predeterminado)", Hit::DefaultLauncher),
-            (G_FOLDER, "Carpeta de proyectos", Hit::BaseDir),
-            (G_EDIT, "Personalizar Programas, Frameworks y Librerías", Hit::OpenCustomEditor),
-            (G_ADD, "Agregar proyecto existente", Hit::AddExisting),
-            (G_EXIT, "Salir de Isla Dev", Hit::Quit),
-        ];
-        let mut ry = y + 66.0;
-        for (glyph, label, id) in items {
-            self.row_bg(lx, ry, tw, 48.0, id, false);
-            let c = if id == Hit::Quit { RED } else { WHITE };
-            g.text(
-                glyph,
-                &g.f.icon_sm,
-                lx + 22.0,
-                ry,
-                28.0,
-                48.0,
-                if id == Hit::Quit { RED } else { GRAY },
-                1.0,
-            );
-            g.text(label, &g.f.body, lx + 58.0, ry, tw - 210.0, 48.0, c, 1.0);
-            let vx = lx + tw - 210.0;
-            match id {
-                Hit::ToggleVisibility => {
-                    let on = self.visible;
-                    let tx = lx + tw - 66.0;
-                    g.rrect(tx, ry + 13.0, 42.0, 22.0, 11.0, if on { WHITE } else { 0x27272A }, 1.0);
-                    g.circle(
-                        if on { tx + 31.0 } else { tx + 11.0 },
-                        ry + 24.0,
-                        8.0,
-                        if on { 0x000000 } else { 0x71717A },
-                        1.0,
-                    );
-                }
-                Hit::ToggleFullscreenHide => {
-                    let on = self.cfg.hide_on_fullscreen;
-                    let tx = lx + tw - 66.0;
-                    g.rrect(tx, ry + 13.0, 42.0, 22.0, 11.0, if on { WHITE } else { 0x27272A }, 1.0);
-                    g.circle(
-                        if on { tx + 31.0 } else { tx + 11.0 },
-                        ry + 24.0,
-                        8.0,
-                        if on { 0x000000 } else { 0x71717A },
-                        1.0,
-                    );
-                }
-                Hit::CycleMonitor => {
-                    g.text(&mon_lbl, &g.f.sub_r, vx, ry, 170.0, 48.0, GRAY, 1.0);
-                    g.text(G_CHEV, &g.f.icon_sm, lx + tw - 36.0, ry, 20.0, 48.0, DIM, 1.0);
-                }
-                Hit::Startup => {
-                    let on = self.startup;
-                    let tx = lx + tw - 66.0;
-                    g.rrect(tx, ry + 13.0, 42.0, 22.0, 11.0, if on { WHITE } else { 0x27272A }, 1.0);
-                    g.circle(
-                        if on { tx + 31.0 } else { tx + 11.0 },
-                        ry + 24.0,
-                        8.0,
-                        if on { 0x000000 } else { 0x71717A },
-                        1.0,
-                    );
-                }
-                Hit::DefaultLauncher => {
-                    g.text(&launcher, &g.f.sub_r, vx, ry, 170.0, 48.0, GRAY, 1.0);
-                    g.text(G_CHEV, &g.f.icon_sm, lx + tw - 36.0, ry, 20.0, 48.0, DIM, 1.0);
-                }
-                Hit::BaseDir => {
-                    g.text(&self.cfg.base_dir, &g.f.sub_r, vx, ry, 170.0, 48.0, GRAY, 1.0);
-                    g.text(G_CHEV, &g.f.icon_sm, lx + tw - 36.0, ry, 20.0, 48.0, DIM, 1.0);
-                }
-                Hit::OpenCustomEditor => {
-                    g.text("Abrir editor visual", &g.f.sub_r, vx, ry, 170.0, 48.0, GRAY, 1.0);
-                    g.text(G_CHEV, &g.f.icon_sm, lx + tw - 36.0, ry, 20.0, 48.0, DIM, 1.0);
-                }
-                _ => {}
-            }
-            ry += 48.0;
-        }
-        // Pie de firma y versión del sistema
-        g.line(lx + 20.0, ry + 4.0, lx + tw - 20.0, ry + 4.0, WHITE, 0.06, 1.0);
-        g.text(
-            &format!("{APP_AUTHOR}  ·  Isla Dev {APP_VERSION}"),
-            &g.f.small_c,
-            lx + 16.0,
-            ry + 8.0,
-            tw - 32.0,
-            22.0,
-            GRAY,
-            0.85,
-        );
-    }
-
-    fn cur_libs_len(&self) -> usize {
+    pub(crate) fn cur_libs_len(&self) -> usize {
         self.cfg
             .templates
             .get(self.wiz_tpl)
@@ -1668,555 +1024,9 @@ impl App {
             .unwrap_or(0)
     }
 
-    fn draw_wizard(&self, lx: f32, y: f32, tw: f32, th: f32) {
-        let g = &self.gfx;
-        let has_libs = self.cur_libs_len() > 0;
-        let total = if has_libs { 3 } else { 2 };
-        let (n, label) = match self.step {
-            Step::Name => (1, "Nombre, GitHub y framework"),
-            Step::Libraries => (2, "Librerías compatibles"),
-            Step::Launcher => (total, "Abrir con"),
-        };
-        self.header(lx, y, tw, "Nuevo proyecto", &format!("Paso {n} de {total} · {label}"), true);
-        let mut ry = y + 70.0;
-        match self.step {
-            Step::Name => {
-                let bx = lx + 16.0;
-                let bw = tw - 32.0;
-                g.rrect(bx, ry, bw, 42.0, 10.0, WHITE, 0.06);
-                g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 41.0, 10.0, WHITE, 0.6, 1.0);
-                if self.wiz_name.is_empty() {
-                    g.text("nombre-del-proyecto", &g.f.input, bx + 14.0, ry, bw - 28.0, 42.0, DIM, 1.0);
-                } else {
-                    g.text(&self.wiz_name, &g.f.input, bx + 14.0, ry, bw - 28.0, 42.0, WHITE, 1.0);
-                }
-                let cx = bx + 14.0 + g.measure(&self.wiz_name, &g.f.input) + 1.0;
-                g.line(cx, ry + 11.0, cx, ry + 31.0, WHITE, 1.0, 1.5);
-                self.hit(bx, ry, bw, 42.0, Hit::Input);
-                ry += 46.0;
-
-                let (txt, c) = match &self.wiz_err {
-                    Some(e) => (e.clone(), RED),
-                    None => {
-                        let nm = if self.wiz_name.is_empty() { "…" } else { &self.wiz_name };
-                        (format!("{}\\{}", self.cfg.base_dir, nm), DIM)
-                    }
-                };
-                g.text(&txt, &g.f.sub, bx + 4.0, ry, bw - 8.0, 20.0, c, 1.0);
-                ry += 24.0;
-
-                // Opción directa para subir a GitHub automáticamente al crear el proyecto
-                let gh_hov = self.hov(Hit::WizToggleGithub);
-                g.rrect(bx, ry, bw, 38.0, 10.0, WHITE, if gh_hov { 0.09 } else { 0.05 });
-                g.rrect_stroke(
-                    bx + 0.5,
-                    ry + 0.5,
-                    bw - 1.0,
-                    37.0,
-                    10.0,
-                    if self.wiz_github { GREEN } else { BORDER },
-                    0.7,
-                    1.0,
-                );
-                if self.wiz_github {
-                    g.rrect(bx + 12.0, ry + 9.0, 20.0, 20.0, 6.0, GREEN, 1.0);
-                    g.text(G_CHECK, &g.f.icon_sm, bx + 12.0, ry + 9.0, 20.0, 20.0, 0x000000, 1.0);
-                } else {
-                    g.rrect_stroke(bx + 12.5, ry + 9.5, 19.0, 19.0, 6.0, GRAY, 0.8, 1.2);
-                }
-                g.text(
-                    "Subir a GitHub automáticamente al crear (git init + commit + push)",
-                    &g.f.body,
-                    bx + 42.0,
-                    ry,
-                    bw - 52.0,
-                    38.0,
-                    WHITE,
-                    1.0,
-                );
-                self.hit(bx, ry, bw, 38.0, Hit::WizToggleGithub);
-                ry += 44.0;
-
-                let max_vis = 5usize;
-                let max_sc = self.cfg.templates.len().saturating_sub(max_vis);
-                let sc = self.wiz_tpl_scroll.min(max_sc);
-                for (i, t) in self.cfg.templates.iter().enumerate().skip(sc).take(max_vis) {
-                    let sel = i == self.wiz_tpl;
-                    self.row_bg(lx, ry, tw, 46.0, Hit::Template(i), sel);
-                    g.draw_stack_badge(&t.stack, lx + 20.0, ry + 5.0, 36.0);
-                    g.text(&t.name, &g.f.body, lx + 66.0, ry, tw - 220.0, 46.0, WHITE, 1.0);
-                    g.text(&t.stack, &g.f.sub_r, lx + tw - 200.0, ry, 148.0, 46.0, GRAY, 1.0);
-                    if sel {
-                        g.text(G_CHECK, &g.f.icon_sm, lx + tw - 44.0, ry, 20.0, 46.0, WHITE, 1.0);
-                    }
-                    ry += 46.0;
-                }
-            }
-            Step::Libraries => {
-                if let Some(t) = self.cfg.templates.get(self.wiz_tpl) {
-                    let max_vis = 6usize;
-                    let max_sc = t.libraries.len().saturating_sub(max_vis);
-                    let sc = self.wiz_lib_scroll.min(max_sc);
-                    for (i, l) in t.libraries.iter().enumerate().skip(sc).take(max_vis) {
-                        let on = self.wiz_libs.get(i).copied().unwrap_or(false);
-                        self.row_bg(lx, ry, tw, 46.0, Hit::Library(i), false);
-                        if on {
-                            g.rrect(lx + 24.0, ry + 13.0, 20.0, 20.0, 6.0, WHITE, 1.0);
-                            g.text(G_CHECK, &g.f.icon_sm, lx + 24.0, ry + 13.0, 20.0, 20.0, 0x000000, 1.0);
-                        } else {
-                            g.rrect_stroke(lx + 24.5, ry + 13.5, 19.0, 19.0, 6.0, GRAY, 0.8, 1.2);
-                        }
-                        g.text(&l.name, &g.f.body, lx + 58.0, ry, 190.0, 46.0, WHITE, 1.0);
-                        g.text(&l.command, &g.f.sub_r, lx + 245.0, ry, tw - 268.0, 46.0, DIM, 1.0);
-                        ry += 46.0;
-                    }
-                }
-                // Botón directo para configurar o añadir nuevas librerías
-                self.row_bg(lx, ry + 2.0, tw, 44.0, Hit::WizOpenLibEditor, false);
-                g.text(G_ADD, &g.f.icon_sm, lx + 22.0, ry + 2.0, 28.0, 44.0, GREEN, 1.0);
-                g.text(
-                    "Configurar o agregar nueva librería a este framework…",
-                    &g.f.body,
-                    lx + 58.0,
-                    ry + 2.0,
-                    tw - 80.0,
-                    44.0,
-                    GREEN,
-                    1.0,
-                );
-            }
-            Step::Launcher => {
-                for (i, l) in self.cfg.launchers.iter().enumerate().take(6) {
-                    let sel = i == self.wiz_launcher;
-                    self.row_bg(lx, ry, tw, 46.0, Hit::Launcher(i), sel);
-                    g.ring(lx + 34.0, ry + 23.0, 8.0, if sel { WHITE } else { GRAY }, 1.0, 1.5);
-                    if sel {
-                        g.circle(lx + 34.0, ry + 23.0, 4.5, WHITE, 1.0);
-                    }
-                    g.text(&l.name, &g.f.body, lx + 58.0, ry, 200.0, 46.0, WHITE, 1.0);
-                    g.text(&l.command, &g.f.sub_r, lx + 250.0, ry, tw - 274.0, 46.0, DIM, 1.0);
-                    ry += 46.0;
-                }
-                self.row_bg(lx, ry + 2.0, tw, 44.0, Hit::WizOpenLauncherEditor, false);
-                g.text(G_ADD, &g.f.icon_sm, lx + 22.0, ry + 2.0, 28.0, 44.0, GREEN, 1.0);
-                g.text(
-                    "Agregar otro programa (.exe) para abrir proyectos…",
-                    &g.f.body,
-                    lx + 58.0,
-                    ry + 2.0,
-                    tw - 80.0,
-                    44.0,
-                    GREEN,
-                    1.0,
-                );
-            }
-        }
-        let by = y + th - 58.0;
-        g.line(lx + 16.0, by, lx + tw - 16.0, by, WHITE, 0.08, 1.0);
-        g.text("Enter continuar · Esc volver", &g.f.sub, lx + 22.0, by + 8.0, 220.0, 44.0, DIM, 1.0);
-        let last = self.step == Step::Launcher;
-        let bw = if last { 160.0 } else { 130.0 };
-        let bx = lx + tw - 16.0 - bw;
-        let hv = self.hov(Hit::Next);
-        g.rrect(bx, by + 12.0, bw, 36.0, 18.0, WHITE, if hv { 1.0 } else { 0.92 });
-        g.text(
-            if last { "Crear y abrir" } else { "Siguiente" },
-            &g.f.btn,
-            bx,
-            by + 12.0,
-            bw,
-            36.0,
-            0x000000,
-            1.0,
-        );
-        self.hit(bx, by + 12.0, bw, 36.0, Hit::Next);
-    }
-
-    fn draw_git_modal(&self, lx: f32, y: f32, tw: f32, _th: f32) {
-        let g = &self.gfx;
-        let Some(p) = self.cfg.projects.get(self.git_proj_idx) else { return };
-        let git_opt = self.git_states.get(&p.path);
-        let branch = git_opt.map(|x| x.branch.as_str()).unwrap_or("main");
-        let dirty_cnt = git_opt.map(|x| x.changed_count).unwrap_or(0);
-        let has_remote = git_opt.and_then(|x| x.remote_url.as_ref()).is_some();
-
-        let sub = if has_remote {
-            format!("Rama ⎇ {branch} · {dirty_cnt} cambios pendientes · Conectado a GitHub")
-        } else {
-            format!("Rama ⎇ {branch} · Se creará y subirá a tu cuenta de GitHub")
-        };
-        self.header(lx, y, tw, &format!("Git & GitHub · {}", p.name), &sub, true);
-
-        let mut ry = y + 76.0;
-        let bx = lx + 16.0;
-        let bw = tw - 32.0;
-
-        g.text("Mensaje del Commit:", &g.f.sub, bx, ry, bw, 20.0, GRAY, 1.0);
-        ry += 22.0;
-
-        g.rrect(bx, ry, bw, 42.0, 10.0, WHITE, 0.07);
-        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 41.0, 10.0, WHITE, 0.65, 1.0);
-        if self.git_commit_msg.is_empty() {
-            g.text(
-                "Escribe el nombre/mensaje del commit…",
-                &g.f.input,
-                bx + 14.0,
-                ry,
-                bw - 28.0,
-                42.0,
-                DIM,
-                1.0,
-            );
-        } else {
-            g.text(&self.git_commit_msg, &g.f.input, bx + 14.0, ry, bw - 28.0, 42.0, WHITE, 1.0);
-        }
-        let cur_x = (bx + 14.0 + g.measure(&self.git_commit_msg, &g.f.input) + 1.5).min(bx + bw - 16.0);
-        g.line(cur_x, ry + 11.0, cur_x, ry + 31.0, WHITE, 1.0, 1.5);
-        self.hit(bx, ry, bw, 42.0, Hit::GitCommitInput);
-        ry += 52.0;
-
-        if !has_remote {
-            let vis_hov = self.hov(Hit::GitTogglePublic);
-            g.rrect(bx, ry, bw, 36.0, 9.0, WHITE, if vis_hov { 0.09 } else { 0.05 });
-            g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 35.0, 9.0, BORDER, 0.8, 1.0);
-            let vis_txt = if self.git_public {
-                "Visibilidad en GitHub: 🌐 Público (clic para cambiar a Privado)"
-            } else {
-                "Visibilidad en GitHub: 🔒 Privado (clic para cambiar a Público)"
-            };
-            g.text(vis_txt, &g.f.body, bx + 14.0, ry, bw - 28.0, 36.0, WHITE, 1.0);
-            self.hit(bx, ry, bw, 36.0, Hit::GitTogglePublic);
-            ry += 44.0;
-        }
-
-        // Botón principal: Hacer Commit y Push / Subir a GitHub
-        let hv_push = self.hov(Hit::GitDoCommitPush);
-        g.rrect(bx, ry, bw, 44.0, 11.0, WHITE, if hv_push { 1.0 } else { 0.92 });
-        let btn_lbl = if has_remote {
-            format!("{G_UPLOAD}  Hacer Commit y Push a GitHub")
-        } else {
-            format!("{G_UPLOAD}  Inicializar, Hacer Commit y Subir a GitHub")
-        };
-        g.text(&btn_lbl, &g.f.btn, bx, ry, bw, 44.0, 0x000000, 1.0);
-        self.hit(bx, ry, bw, 44.0, Hit::GitDoCommitPush);
-        ry += 54.0;
-
-        // Botones secundarios: Git Pull, Abrir en GitHub, Ver log en terminal
-        let third_w = (bw - 16.0) / 3.0;
-        self.pill_action_btn(bx, ry, third_w, 36.0, &format!("{G_DOWNLOAD} Git Pull"), WHITE, false, Hit::GitDoPull);
-        self.pill_action_btn(
-            bx + third_w + 8.0,
-            ry,
-            third_w,
-            36.0,
-            &format!("{G_GLOBE} Abrir en GitHub"),
-            WHITE,
-            has_remote,
-            Hit::GitOpenRepoWeb,
-        );
-        self.pill_action_btn(
-            bx + (third_w + 8.0) * 2.0,
-            ry,
-            third_w,
-            36.0,
-            &format!("{G_TERM} Ver terminal Git"),
-            GREEN,
-            false,
-            Hit::GitOpenLogTerm,
-        );
-    }
-
-    fn draw_custom_editor(&self, lx: f32, y: f32, tw: f32, _th: f32) {
-        let g = &self.gfx;
-        self.header(
-            lx,
-            y,
-            tw,
-            "Personalizar Isla Dev",
-            "Agrega librerías, programas (.exe) o frameworks sin editar archivos",
-            true,
-        );
-        let mut ry = y + 72.0;
-        let bx = lx + 16.0;
-        let bw = tw - 32.0;
-
-        // 3 Pestañas superiores
-        let tabs = ["1. Librerías", "2. Programas (Abrir con)", "3. Frameworks"];
-        let tab_w = (bw - 16.0) / 3.0;
-        for (i, t_lbl) in tabs.iter().enumerate() {
-            let tx = bx + i as f32 * (tab_w + 8.0);
-            let active = self.ed_tab == i;
-            self.pill_action_btn(tx, ry, tab_w, 32.0, t_lbl, WHITE, active, Hit::EdTab(i));
-        }
-        ry += 42.0;
-
-        match self.ed_tab {
-            0 => {
-                // Pestaña 0: Configurar Librerías por Framework
-                let tpl_idx = self.ed_tpl_idx.min(self.cfg.templates.len().saturating_sub(1));
-                let tpl_name = self
-                    .cfg
-                    .templates
-                    .get(tpl_idx)
-                    .map(|t| format!("Framework: {} ({})", t.name, t.stack))
-                    .unwrap_or_else(|| "Sin plantillas".into());
-
-                self.pill_action_btn(bx, ry, 42.0, 32.0, "◀", WHITE, false, Hit::EdPrevTpl);
-                g.rrect(bx + 48.0, ry, bw - 96.0, 32.0, 8.0, CARD, 0.9);
-                g.text(&tpl_name, &g.f.small_c, bx + 48.0, ry, bw - 96.0, 32.0, WHITE, 1.0);
-                self.pill_action_btn(bx + bw - 42.0, ry, 42.0, 32.0, "▶", WHITE, false, Hit::EdNextTpl);
-                ry += 40.0;
-
-                // Campos para agregar nueva librería
-                let f1_w = 180.0;
-                let f2_w = bw - f1_w - 118.0;
-                self.draw_input_box(bx, ry, f1_w, 36.0, "Nombre (ej. Prisma)", &self.ed_f1, self.ed_focus == 0, Hit::EdField(0));
-                self.draw_input_box(
-                    bx + f1_w + 8.0,
-                    ry,
-                    f2_w,
-                    36.0,
-                    "Comando (ej. npm i prisma)",
-                    &self.ed_f2,
-                    self.ed_focus == 1,
-                    Hit::EdField(1),
-                );
-                self.pill_action_btn(
-                    bx + f1_w + f2_w + 16.0,
-                    ry,
-                    102.0,
-                    36.0,
-                    "+ Agregar",
-                    GREEN,
-                    true,
-                    Hit::EdSave,
-                );
-                ry += 44.0;
-
-                if let Some((msg, is_err)) = &self.ed_msg {
-                    g.text(msg, &g.f.sub, bx + 4.0, ry - 4.0, bw, 18.0, if *is_err { RED } else { GREEN }, 1.0);
-                    ry += 18.0;
-                }
-
-                // Lista de librerías actuales de este framework
-                if let Some(t) = self.cfg.templates.get(tpl_idx) {
-                    let max_vis = 5usize;
-                    let max_sc = t.libraries.len().saturating_sub(max_vis);
-                    let sc = self.ed_scroll.min(max_sc);
-                    for (i, l) in t.libraries.iter().enumerate().skip(sc).take(max_vis) {
-                        self.row_bg(lx, ry, tw, 44.0, Hit::EdToggleLibDefault(i), false);
-                        if l.default {
-                            g.rrect(lx + 22.0, ry + 12.0, 20.0, 20.0, 6.0, GREEN, 1.0);
-                            g.text(G_CHECK, &g.f.icon_sm, lx + 22.0, ry + 12.0, 20.0, 20.0, 0x000000, 1.0);
-                        } else {
-                            g.rrect_stroke(lx + 22.5, ry + 12.5, 19.0, 19.0, 6.0, GRAY, 0.7, 1.2);
-                        }
-                        g.text(&l.name, &g.f.body, lx + 52.0, ry, 165.0, 44.0, WHITE, 1.0);
-                        g.text(&l.command, &g.f.sub_r, lx + 220.0, ry, tw - 275.0, 44.0, DIM, 1.0);
-                        self.mini_action_btn(lx + tw - 44.0, ry + 9.0, 26.0, G_TRASH, RED, false, Hit::EdDeleteItem(i));
-                        ry += 44.0;
-                    }
-                }
-            }
-            1 => {
-                // Pestaña 1: Configurar Programas ("Abrir con...") con selector de archivo .exe
-                self.draw_input_box(
-                    bx,
-                    ry,
-                    bw,
-                    36.0,
-                    "Nombre del programa (ej. WebStorm, Sublime Text, Rider)",
-                    &self.ed_f1,
-                    self.ed_focus == 0,
-                    Hit::EdField(0),
-                );
-                ry += 42.0;
-
-                let cmd_w = bw - 138.0;
-                self.draw_input_box(
-                    bx,
-                    ry,
-                    cmd_w,
-                    36.0,
-                    "Comando o ruta .exe (ej. \"C:\\...\\app.exe\" \"{path}\")",
-                    &self.ed_f2,
-                    self.ed_focus == 1,
-                    Hit::EdField(1),
-                );
-                self.pill_action_btn(
-                    bx + cmd_w + 8.0,
-                    ry,
-                    130.0,
-                    36.0,
-                    "📁 Elegir .exe…",
-                    WHITE,
-                    true,
-                    Hit::EdPickExe,
-                );
-                ry += 44.0;
-
-                self.pill_action_btn(bx, ry, bw, 36.0, "+ Guardar programa en 'Abrir con'", GREEN, true, Hit::EdSave);
-                ry += 44.0;
-
-                if let Some((msg, is_err)) = &self.ed_msg {
-                    g.text(msg, &g.f.sub, bx + 4.0, ry - 4.0, bw, 18.0, if *is_err { RED } else { GREEN }, 1.0);
-                    ry += 18.0;
-                }
-
-                let max_vis = 4usize;
-                let max_sc = self.cfg.launchers.len().saturating_sub(max_vis);
-                let sc = self.ed_scroll.min(max_sc);
-                for (i, l) in self.cfg.launchers.iter().enumerate().skip(sc).take(max_vis) {
-                    self.row_bg(lx, ry, tw, 44.0, Hit::Launcher(i), false);
-                    g.text(&l.name, &g.f.body, lx + 24.0, ry, 190.0, 44.0, WHITE, 1.0);
-                    g.text(&l.command, &g.f.sub_r, lx + 215.0, ry, tw - 270.0, 44.0, DIM, 1.0);
-                    if self.cfg.launchers.len() > 1 {
-                        self.mini_action_btn(lx + tw - 44.0, ry + 9.0, 26.0, G_TRASH, RED, false, Hit::EdDeleteItem(i));
-                    }
-                    ry += 44.0;
-                }
-            }
-            _ => {
-                // Pestaña 2: Agregar Nuevo Framework / Plantilla
-                let name_w = bw - 190.0;
-                self.draw_input_box(
-                    bx,
-                    ry,
-                    name_w,
-                    36.0,
-                    "Nombre (ej. Nuxt 3, Remix, Laravel)",
-                    &self.ed_f1,
-                    self.ed_focus == 0,
-                    Hit::EdField(0),
-                );
-                self.pill_action_btn(
-                    bx + name_w + 8.0,
-                    ry,
-                    182.0,
-                    36.0,
-                    &format!("Icono: {} ▸", self.ed_f3),
-                    WHITE,
-                    true,
-                    Hit::EdCycleStack,
-                );
-                ry += 42.0;
-
-                self.draw_input_box(
-                    bx,
-                    ry,
-                    bw,
-                    36.0,
-                    "Comando de creación (usa {name}, ej. npx nuxi@latest init {name})",
-                    &self.ed_f2,
-                    self.ed_focus == 1,
-                    Hit::EdField(1),
-                );
-                ry += 44.0;
-
-                self.pill_action_btn(bx, ry, bw, 36.0, "+ Guardar nuevo Framework", GREEN, true, Hit::EdSave);
-                ry += 44.0;
-
-                if let Some((msg, is_err)) = &self.ed_msg {
-                    g.text(msg, &g.f.sub, bx + 4.0, ry - 4.0, bw, 18.0, if *is_err { RED } else { GREEN }, 1.0);
-                    ry += 18.0;
-                }
-
-                let max_vis = 4usize;
-                let max_sc = self.cfg.templates.len().saturating_sub(max_vis);
-                let sc = self.ed_scroll.min(max_sc);
-                for (i, t) in self.cfg.templates.iter().enumerate().skip(sc).take(max_vis) {
-                    self.row_bg(lx, ry, tw, 44.0, Hit::Template(i), false);
-                    g.draw_stack_badge(&t.stack, lx + 20.0, ry + 6.0, 32.0);
-                    g.text(&t.name, &g.f.body, lx + 60.0, ry, 180.0, 44.0, WHITE, 1.0);
-                    let cmd_preview = t.create.first().or(t.setup.first()).map(|s| s.as_str()).unwrap_or("Carpeta limpia");
-                    g.text(cmd_preview, &g.f.sub_r, lx + 240.0, ry, tw - 295.0, 44.0, DIM, 1.0);
-                    if self.cfg.templates.len() > 1 {
-                        self.mini_action_btn(lx + tw - 44.0, ry + 9.0, 26.0, G_TRASH, RED, false, Hit::EdDeleteItem(i));
-                    }
-                    ry += 44.0;
-                }
-            }
-        }
-    }
-
-    fn draw_input_box(&self, x: f32, y: f32, w: f32, h: f32, placeholder: &str, val: &str, focused: bool, id: Hit) {
-        let g = &self.gfx;
-        g.rrect(x, y, w, h, 8.0, WHITE, if focused { 0.08 } else { 0.04 });
-        g.rrect_stroke(
-            x + 0.5,
-            y + 0.5,
-            w - 1.0,
-            h - 1.0,
-            8.0,
-            if focused { WHITE } else { BORDER },
-            if focused { 0.65 } else { 0.7 },
-            1.0,
-        );
-        if val.is_empty() {
-            g.text(placeholder, &g.f.sub, x + 10.0, y, w - 20.0, h, DIM, 1.0);
-        } else {
-            g.text(val, &g.f.body, x + 10.0, y, w - 20.0, h, WHITE, 1.0);
-        }
-        if focused {
-            let cx = (x + 10.0 + g.measure(val, &g.f.body) + 1.5).min(x + w - 10.0);
-            g.line(cx, y + 9.0, cx, y + h - 9.0, WHITE, 0.95, 1.4);
-        }
-        self.hit(x, y, w, h, id);
-    }
-
-    fn draw_status(&self, lx: f32, y: f32, tw: f32, h: f32) {
-        let g = &self.gfx;
-        let cy = y + h / 2.0;
-        match self.skind {
-            SKind::Error => {
-                g.circle(lx + 30.0, cy, 18.0, RED, 1.0);
-                g.text(G_ERR, &g.f.icon, lx + 12.0, cy - 18.0, 36.0, 36.0, WHITE, 1.0);
-            }
-            _ => {
-                g.draw_logo(lx + 14.0, cy - 18.0, 36.0, 36.0, 1.0);
-            }
-        }
-        g.text(&self.s_title, &g.f.title, lx + 60.0, cy - 19.0, tw - 110.0, 19.0, WHITE, 1.0);
-        g.text(
-            &self.s_sub,
-            &g.f.sub,
-            lx + 60.0,
-            cy + 1.0,
-            tw - 110.0,
-            18.0,
-            if self.skind == SKind::Creating {
-                WHITE
-            } else if self.skind == SKind::Error {
-                AMBER
-            } else {
-                GRAY
-            },
-            1.0,
-        );
-        let rx = lx + tw - 32.0;
-        match self.skind {
-            SKind::Opening | SKind::Creating => {
-                for i in 0..8 {
-                    let a = i as f32 / 8.0 * std::f32::consts::TAU + self.spin * 5.0;
-                    let fade = 0.2 + 0.8 * (i as f32 / 8.0);
-                    g.circle(rx + a.cos() * 8.0, cy + a.sin() * 8.0, 1.8, WHITE, fade);
-                }
-            }
-            SKind::Done => {
-                g.circle(rx, cy, 11.0, WHITE, 1.0);
-                g.text(G_CHECK, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, 0x000000, 1.0);
-            }
-            SKind::Error => {
-                g.circle(rx, cy, 13.0, WHITE, 0.14);
-                g.text(G_TERM, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, WHITE, 1.0);
-            }
-        }
-        self.hit(lx, y, tw, h, Hit::Pill);
-    }
-
     // ---------- lógica ----------
 
-    fn status(&mut self, kind: SKind, title: &str, sub: &str, color: u32, init: &str) {
+    pub(crate) fn status(&mut self, kind: SKind, title: &str, sub: &str, color: u32, init: &str) {
         self.skind = kind;
         self.s_title = title.into();
         self.s_sub = sub.into();
@@ -2229,24 +1039,17 @@ impl App {
         self.kick();
     }
 
-    fn error(&mut self, title: &str, sub: &str, log_path: Option<PathBuf>) {
+    pub(crate) fn error(&mut self, title: &str, sub: &str, log_path: Option<PathBuf>) {
         self.s_log_path = log_path;
         self.status(SKind::Error, title, sub, RED, "!");
         self.s_deadline = Some(Instant::now() + Duration::from_secs(9));
     }
 
-    fn toggle_project_server(&mut self, i: usize) {
-        let Some(p) = self.cfg.projects.get(i).cloned() else { return };
-        if let Some(srv) = self.servers.remove(&p.path) {
-            actions::stop_dev_server(srv.pid);
-            let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
-            actions::scan_open_ports(extra_ports, self.tx.clone(), self.hwnd.0 as isize);
-            self.kick();
+    fn start_single_target(&mut self, proj_name: &str, target: &actions::DevTarget) {
+        let key = target.cwd.to_string_lossy().to_string();
+        if self.servers.contains_key(&key) {
             return;
         }
-        let Some((cmd_str, default_port)) = actions::detect_dev_command(Path::new(&p.path), &p.stack) else {
-            return;
-        };
         let mut already_used = self.active_ports.clone();
         for s in self.servers.values() {
             if let Some(pt) = s.port {
@@ -2255,31 +1058,115 @@ impl App {
                 }
             }
         }
+        let display_name = if target.label == "Main" {
+            proj_name.to_string()
+        } else {
+            format!("{proj_name} ({})", target.label)
+        };
         match actions::start_dev_server(
-            p.name.clone(),
-            PathBuf::from(&p.path),
-            cmd_str,
-            default_port,
+            display_name.clone(),
+            target.cwd.clone(),
+            target.cmd.clone(),
+            target.port,
             already_used,
             self.tx.clone(),
             self.hwnd.0 as isize,
         ) {
             Ok((pid, log_path)) => {
                 self.servers.insert(
-                    p.path.clone(),
+                    key,
                     RunningServer {
                         pid,
                         port: None,
                         log_path,
+                        label: target.label.clone(),
+                        project_name: proj_name.to_string(),
                     },
                 );
                 self.kick();
             }
-            Err(e) => self.error(&format!("No se pudo iniciar servidor en {}", p.name), &e, None),
+            Err(e) => self.error(&format!("No se pudo iniciar servidor en {display_name}"), &e, None),
         }
     }
 
-    fn toggle_pin(&mut self, i: usize) {
+    fn stop_single_target(&mut self, cwd: &Path) -> bool {
+        let key = cwd.to_string_lossy().to_string();
+        if let Some(srv) = self.servers.remove(&key) {
+            actions::stop_dev_server(srv.pid);
+            let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
+            actions::scan_open_ports(extra_ports, self.tx.clone(), self.hwnd.0 as isize);
+            self.kick();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn toggle_project_server(&mut self, i: usize) {
+        self.toggle_project_server_role(i, ServerRole::Main);
+    }
+
+    pub(crate) fn toggle_project_server_role(&mut self, i: usize, role: ServerRole) {
+        let Some(p) = self.cfg.projects.get(i).cloned() else { return };
+        let fs_info = self
+            .fullstack_map
+            .get(&p.path)
+            .cloned()
+            .unwrap_or_else(|| actions::detect_project_targets(Path::new(&p.path), &p.stack, p.linked_path.as_deref()));
+
+        match role {
+            ServerRole::Main => {
+                if let Some(t) = &fs_info.main {
+                    if !self.stop_single_target(&t.cwd) {
+                        self.start_single_target(&p.name, t);
+                    }
+                }
+            }
+            ServerRole::Front => {
+                if let Some(t) = &fs_info.front {
+                    if !self.stop_single_target(&t.cwd) {
+                        self.start_single_target(&p.name, t);
+                    }
+                }
+            }
+            ServerRole::Back => {
+                if let Some(t) = &fs_info.back {
+                    if !self.stop_single_target(&t.cwd) {
+                        self.start_single_target(&p.name, t);
+                    }
+                }
+            }
+            ServerRole::Both => {
+                let f_running = fs_info
+                    .front
+                    .as_ref()
+                    .map(|t| self.servers.contains_key(&t.cwd.to_string_lossy().to_string()))
+                    .unwrap_or(false);
+                let b_running = fs_info
+                    .back
+                    .as_ref()
+                    .map(|t| self.servers.contains_key(&t.cwd.to_string_lossy().to_string()))
+                    .unwrap_or(false);
+                if f_running && b_running {
+                    if let Some(f) = &fs_info.front {
+                        self.stop_single_target(&f.cwd);
+                    }
+                    if let Some(b) = &fs_info.back {
+                        self.stop_single_target(&b.cwd);
+                    }
+                } else {
+                    if let Some(f) = &fs_info.front {
+                        self.start_single_target(&p.name, f);
+                    }
+                    if let Some(b) = &fs_info.back {
+                        self.start_single_target(&p.name, b);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn toggle_pin(&mut self, i: usize) {
         if let Some(p) = self.cfg.projects.get_mut(i) {
             p.pinned = !p.pinned;
         }
@@ -2288,7 +1175,7 @@ impl App {
         self.kick();
     }
 
-    fn open_project(&mut self, i: usize, launcher: Option<String>) {
+    pub(crate) fn open_project(&mut self, i: usize, launcher: Option<String>) {
         let Some(p) = self.cfg.projects.get(i).cloned() else { return };
         let lid = launcher
             .clone()
@@ -2339,7 +1226,56 @@ impl App {
         }
     }
 
-    fn start_wizard(&mut self) {
+    pub(crate) fn clone_from_clipboard(&mut self) {
+        let Some((repo_name, url)) = self
+            .clipboard_repo
+            .clone()
+            .or_else(|| actions::read_clipboard_github_repo(self.hwnd))
+        else {
+            return;
+        };
+        let base = PathBuf::from(&self.cfg.base_dir);
+        let dest = base.join(&repo_name);
+        if dest.exists() {
+            if let Some(idx) = self
+                .cfg
+                .projects
+                .iter()
+                .position(|p| p.path.eq_ignore_ascii_case(&dest.to_string_lossy()))
+            {
+                self.open_project(idx, None);
+            } else {
+                self.register_and_open_folder(dest, true);
+            }
+            return;
+        }
+        let launcher = self.cfg.default_launcher.clone();
+        self.pending = Some(Pending {
+            name: repo_name.clone(),
+            stack: "Node.js".into(),
+            color: "#3B82F6".into(),
+            launcher,
+        });
+        let log = config::logs_dir().join(format!("clone-{}.log", actions::safe_slug(&repo_name)));
+        let tx = self.tx.clone();
+        let hw = self.hwnd.0 as isize;
+        self.s_log_path = Some(log.clone());
+        self.s_proj_path = Some(dest);
+        self.bg_progress = Some(0.15);
+        self.resume_view = None;
+        let rn = repo_name.clone();
+        std::thread::spawn(move || actions::git_clone_repo(url, rn, base, log, tx, hw));
+        self.status(
+            SKind::Creating,
+            &format!("Clonando {repo_name}…"),
+            "Descargando repositorio de GitHub…",
+            GREEN,
+            "📥",
+        );
+        self.s_deadline = None;
+    }
+
+    pub(crate) fn start_wizard(&mut self) {
         self.wiz_name.clear();
         self.wiz_err = None;
         self.wiz_tpl = 0;
@@ -2351,7 +1287,7 @@ impl App {
         self.set_view(View::Wizard);
     }
 
-    fn reset_libs(&mut self) {
+    pub(crate) fn reset_libs(&mut self) {
         self.wiz_libs = self
             .cfg
             .templates
@@ -2361,14 +1297,14 @@ impl App {
         self.wiz_lib_scroll = 0;
     }
 
-    fn goto_step(&mut self, s: Step) {
+    pub(crate) fn goto_step(&mut self, s: Step) {
         self.step = s;
         self.hover = None;
         self.fade();
         self.kick();
     }
 
-    fn wizard_next(&mut self) {
+    pub(crate) fn wizard_next(&mut self) {
         match self.step {
             Step::Name => {
                 let name = self.wiz_name.trim().to_string();
@@ -2390,7 +1326,7 @@ impl App {
         }
     }
 
-    fn back(&mut self) {
+    pub(crate) fn back(&mut self) {
         match self.view {
             View::Wizard => match self.step {
                 Step::Name => self.set_view(View::Expanded),
@@ -2399,10 +1335,11 @@ impl App {
                     self.goto_step(if self.cur_libs_len() > 0 { Step::Libraries } else { Step::Name })
                 }
             },
-            View::Settings | View::GitModal => self.set_view(View::Expanded),
+            View::Settings | View::GitModal | View::NoteModal => self.set_view(View::Expanded),
             View::CustomEditor => self.set_view(View::Settings),
-            View::Expanded if !self.search.is_empty() => {
+            View::Expanded if !self.search.is_empty() || self.filter_mode != FilterMode::All => {
                 self.search.clear();
+                self.filter_mode = FilterMode::All;
                 self.sel_idx = 0;
                 self.scroll = 0;
                 self.kick();
@@ -2444,6 +1381,7 @@ impl App {
         let auto_gh = self.wiz_github;
         self.s_log_path = Some(log.clone());
         self.s_proj_path = Some(base.join(&name));
+        self.bg_progress = Some(0.08);
         self.resume_view = None;
         std::thread::spawn(move || actions::scaffold(tpl, libs, name.clone(), base, auto_gh, log, tx, hw));
         let n = self.wiz_name.trim().to_string();
@@ -2454,27 +1392,46 @@ impl App {
     fn on_worker(&mut self) {
         while let Ok(m) = self.rx.try_recv() {
             match m {
-                WorkMsg::Progress(s) => {
-                    self.s_sub = s;
+                WorkMsg::Progress(frac, s) => {
+                    if frac <= 0.001 && s.is_empty() {
+                        self.bg_progress = None;
+                    } else {
+                        self.bg_progress = Some(frac.clamp(0.05, 0.98));
+                        self.s_sub = s;
+                    }
                     self.kick();
                 }
                 WorkMsg::Done { res: Ok(path), warn } => {
+                    self.bg_progress = None;
                     let Some(p) = self.pending.take() else { continue };
+                    let (det_stack, det_color) = actions::detect(&path);
+                    let final_stack = if p.stack == "Node.js" && det_stack != "Solo carpeta" {
+                        det_stack
+                    } else {
+                        p.stack
+                    };
+                    let final_color = if p.color == "#3B82F6" && det_color != "#6366F1" {
+                        det_color
+                    } else {
+                        p.color
+                    };
                     self.cfg.projects.push(Project {
                         name: p.name.clone(),
                         path: path.to_string_lossy().to_string(),
-                        stack: p.stack,
-                        color: p.color,
+                        stack: final_stack,
+                        color: final_color,
                         launcher: Some(p.launcher.clone()),
                         last_opened: 0,
                         pinned: false,
+                        note: None,
+                        linked_path: None,
                     });
                     let i = self.cfg.projects.len() - 1;
                     self.open_project(i, Some(p.launcher));
                     if let Some((w_msg, log_p)) = warn {
                         self.s_proj_path = Some(path);
                         self.error(
-                            &format!("{} creado con advertencia en librería/Git", p.name),
+                            &format!("{} listo con advertencia en librería/Git", p.name),
                             &format!("{w_msg} · clic para ver terminal"),
                             Some(log_p),
                         );
@@ -2482,10 +1439,11 @@ impl App {
                     self.refresh_live_state();
                 }
                 WorkMsg::Done { res: Err(e), warn: _ } => {
+                    self.bg_progress = None;
                     self.pending = None;
                     let log_p = self.s_log_path.clone();
                     self.error(
-                        "Error al crear el proyecto",
+                        "Error en la operación",
                         &format!("{e} · clic aquí para ver el error en terminal"),
                         log_p,
                     );
@@ -2528,11 +1486,15 @@ impl App {
                     log_path,
                 } => {
                     if self.servers.get(&path).map(|s| s.pid) == Some(pid) {
-                        self.servers.remove(&path);
-                        let proj_name = Path::new(&path)
-                            .file_name()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "Proyecto".into());
+                        let removed = self.servers.remove(&path);
+                        let proj_name = removed
+                            .map(|r| r.project_name)
+                            .unwrap_or_else(|| {
+                                Path::new(&path)
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "Proyecto".into())
+                            });
                         if let Some(reason) = err_reason {
                             self.s_proj_path = Some(PathBuf::from(&path));
                             self.error(
@@ -2552,6 +1514,7 @@ impl App {
                     is_err,
                     log_path,
                 } => {
+                    self.bg_progress = None;
                     if is_err {
                         self.error(&title, &sub, log_path);
                     } else {
@@ -2564,7 +1527,7 @@ impl App {
         }
     }
 
-    fn add_existing(&mut self) {
+    pub(crate) fn add_existing(&mut self) {
         if let Some(p) = actions::pick_folder(self.hwnd, "Agregar proyecto existente") {
             self.register_and_open_folder(p, false);
         }
@@ -2572,7 +1535,7 @@ impl App {
         self.kick();
     }
 
-    fn register_and_open_folder(&mut self, p: PathBuf, open_immediately: bool) {
+    pub(crate) fn register_and_open_folder(&mut self, p: PathBuf, open_immediately: bool) {
         if !p.is_dir() {
             return;
         }
@@ -2591,6 +1554,8 @@ impl App {
                 launcher: None,
                 last_opened: config::now(),
                 pinned: false,
+                note: None,
+                linked_path: None,
             });
             self.cfg.sort_projects();
             self.save();
@@ -2605,7 +1570,16 @@ impl App {
         }
     }
 
-    fn save_custom_editor_item(&mut self) {
+    pub(crate) fn save_project_note(&mut self) {
+        if let Some(p) = self.cfg.projects.get_mut(self.note_proj_idx) {
+            let clean = self.note_text.trim().to_string();
+            p.note = if clean.is_empty() { None } else { Some(clean) };
+            self.save();
+        }
+        self.set_view(View::Expanded);
+    }
+
+    pub(crate) fn save_custom_editor_item(&mut self) {
         let f1 = self.ed_f1.trim().to_string();
         let f2 = self.ed_f2.trim().to_string();
         if f1.is_empty() || f2.is_empty() {
@@ -2675,7 +1649,7 @@ impl App {
         self.kick();
     }
 
-    fn click(&mut self, h: Hit) {
+    pub(crate) fn click(&mut self, h: Hit) {
         match h {
             Hit::Pill => {
                 if self.view == View::Status && self.skind == SKind::Error {
@@ -2712,29 +1686,63 @@ impl App {
                 self.scroll = 0;
                 self.kick();
             }
+            Hit::FilterChip(mode) => {
+                self.filter_mode = if self.filter_mode == mode {
+                    FilterMode::All
+                } else {
+                    mode
+                };
+                self.sel_idx = 0;
+                self.scroll = 0;
+                self.kick();
+            }
+            Hit::CloneClipboardRepo => {
+                self.clone_from_clipboard();
+            }
+            Hit::QuickOpenBaseDir => {
+                actions::open_explorer_at(Path::new(&self.cfg.base_dir));
+                self.minimize_preserving_state();
+            }
+            Hit::QuickSyncProjects => {
+                self.refresh_live_state();
+                self.kick();
+            }
             Hit::PortBadge(port) | Hit::ProjPort(_, port) => {
                 actions::open_browser(&format!("http://localhost:{port}"));
                 self.minimize_preserving_state();
             }
             Hit::PortTerm(port) => {
                 let matched = self
-                    .cfg
-                    .projects
+                    .servers
                     .iter()
-                    .find(|p| self.servers.get(&p.path).and_then(|s| s.port) == Some(port));
-                if let Some(p) = matched {
-                    let lp = self.servers.get(&p.path).map(|s| s.log_path.as_path());
-                    actions::show_server_terminal(Some(&p.name), Some(Path::new(&p.path)), Some(port), lp);
+                    .find(|(_, s)| s.port == Some(port));
+                if let Some((cwd_str, srv)) = matched {
+                    actions::show_server_terminal(
+                        Some(&srv.project_name),
+                        Some(Path::new(cwd_str)),
+                        Some(port),
+                        Some(&srv.log_path),
+                    );
                 } else {
                     actions::show_server_terminal(None, None, Some(port), None);
                 }
                 self.minimize_preserving_state();
             }
             Hit::KillPort(port) => {
+                let matched_pid = self
+                    .servers
+                    .iter()
+                    .find(|(_, s)| s.port == Some(port))
+                    .map(|(k, s)| (k.clone(), s.pid));
+                if let Some((k, pid)) = matched_pid {
+                    self.servers.remove(&k);
+                    actions::stop_dev_server(pid);
+                }
                 actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
             }
             Hit::Project(i) => self.open_project(i, None),
             Hit::ProjServer(i) => self.toggle_project_server(i),
+            Hit::ProjServerRole(i, role) => self.toggle_project_server_role(i, role),
             Hit::ProjServerTerm(i) => {
                 if let Some(p) = self.cfg.projects.get(i) {
                     let srv_port = self.servers.get(&p.path).and_then(|s| s.port);
@@ -2749,6 +1757,13 @@ impl App {
                     self.git_commit_msg = "feat: actualización".into();
                 }
                 self.set_view(View::GitModal);
+            }
+            Hit::ProjNote(i) => {
+                if let Some(p) = self.cfg.projects.get(i) {
+                    self.note_proj_idx = i;
+                    self.note_text = p.note.clone().unwrap_or_default();
+                    self.set_view(View::NoteModal);
+                }
             }
             Hit::ProjTerm(i) => {
                 if let Some(p) = self.cfg.projects.get(i) {
@@ -2904,12 +1919,13 @@ impl App {
                     let msg = self.git_commit_msg.clone();
                     let is_pub = self.git_public;
                     self.s_proj_path = Some(PathBuf::from(&p.path));
+                    self.bg_progress = Some(0.15);
                     self.status(
                         SKind::Creating,
                         &format!("Subiendo {} a GitHub…", p.name),
                         "Ejecutando git add + commit + push…",
                         WHITE,
-                        "⎇",
+                        "✓",
                     );
                     actions::git_commit_and_push(
                         PathBuf::from(&p.path),
@@ -2952,6 +1968,13 @@ impl App {
                     }
                     self.minimize_preserving_state();
                 }
+            }
+            // Note Modal
+            Hit::NoteInput => {}
+            Hit::NoteSave => self.save_project_note(),
+            Hit::NoteClear => {
+                self.note_text.clear();
+                self.save_project_note();
             }
             // Custom Editor
             Hit::EdTab(t) => {
@@ -3046,9 +2069,11 @@ impl App {
         let Some(p) = self.cfg.projects.get(i).cloned() else { return };
         let current = p.launcher.clone().unwrap_or(self.cfg.default_launcher.clone());
         let scripts = actions::detect_package_scripts(Path::new(&p.path));
-        let is_srv_running = self.servers.contains_key(&p.path);
+        let pm = actions::detect_package_manager(Path::new(&p.path));
+        let is_srv_running = self.project_has_running_server(i);
         let srv_port = self.servers.get(&p.path).and_then(|s| s.port);
         let srv_log = self.servers.get(&p.path).map(|s| s.log_path.clone());
+        let fs_info = self.fullstack_map.get(&p.path).cloned();
 
         unsafe {
             let Ok(menu) = CreatePopupMenu() else { return };
@@ -3059,6 +2084,38 @@ impl App {
                     MF_STRING
                 };
                 let _ = AppendMenuW(menu, flags, 100 + k, &HSTRING::from(format!("Abrir con {}", l.name)));
+            }
+
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                210,
+                w!("📝 Editar nota / recordatorio rápido (Mini-TODO)"),
+            );
+            if p.linked_path.is_some() {
+                let _ = AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    212,
+                    w!("⛓️‍💥 Desvincular par Full-Stack (Front/Back)"),
+                );
+            } else {
+                let _ = AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    211,
+                    w!("🔗 Vincular con otro proyecto (Par Front + Back)"),
+                );
+            }
+
+            if let Some(fs) = &fs_info {
+                if fs.is_fullstack() {
+                    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+                    let _ = AppendMenuW(menu, MF_STRING, 310, w!("▶ Iniciar/Detener solo Frontend"));
+                    let _ = AppendMenuW(menu, MF_STRING, 311, w!("▶ Iniciar/Detener solo Backend"));
+                    let _ = AppendMenuW(menu, MF_STRING, 312, w!("⚡ Iniciar/Detener Ambos (Combo Full-Stack)"));
+                }
             }
 
             if is_srv_running {
@@ -3074,7 +2131,7 @@ impl App {
                         menu,
                         MF_STRING,
                         400 + idx,
-                        &HSTRING::from(format!("⚡ npm run {s_name}")),
+                        &HSTRING::from(format!("⚡ {pm} run {s_name}")),
                     );
                 }
             }
@@ -3108,6 +2165,36 @@ impl App {
                     let id = l.id.clone();
                     self.open_project(i, Some(id));
                 }
+            } else if cmd == 210 {
+                self.note_proj_idx = i;
+                self.note_text = p.note.clone().unwrap_or_default();
+                self.set_view(View::NoteModal);
+            } else if cmd == 211 {
+                if let Some(other) = actions::pick_folder(
+                    self.hwnd,
+                    "Selecciona la carpeta del proyecto hermano (Frontend o Backend) para vincular",
+                ) {
+                    if let Some(proj) = self.cfg.projects.get_mut(i) {
+                        proj.linked_path = Some(other.to_string_lossy().to_string());
+                    }
+                    self.save();
+                    self.scan_and_sync();
+                    self.focus();
+                    self.kick();
+                }
+            } else if cmd == 212 {
+                if let Some(proj) = self.cfg.projects.get_mut(i) {
+                    proj.linked_path = None;
+                }
+                self.save();
+                self.scan_and_sync();
+                self.kick();
+            } else if cmd == 310 {
+                self.toggle_project_server_role(i, ServerRole::Front);
+            } else if cmd == 311 {
+                self.toggle_project_server_role(i, ServerRole::Back);
+            } else if cmd == 312 {
+                self.toggle_project_server_role(i, ServerRole::Both);
             } else if cmd == 201 {
                 self.cfg.projects.remove(i);
                 self.scroll = 0;
@@ -3134,6 +2221,7 @@ impl App {
                                 self.cfg.projects.remove(pos);
                             }
                             self.git_states.remove(&p.path);
+                            self.fullstack_map.remove(&p.path);
                             self.scroll = 0;
                             self.save();
                             self.open_windows = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
@@ -3262,6 +2350,7 @@ impl App {
             x if x == VK_RETURN.0 as u32 => match self.view {
                 View::Wizard => self.wizard_next(),
                 View::GitModal => self.click(Hit::GitDoCommitPush),
+                View::NoteModal => self.save_project_note(),
                 View::CustomEditor => self.save_custom_editor_item(),
                 View::Expanded => {
                     let filtered = self.filtered_projects();
@@ -3337,6 +2426,22 @@ impl App {
                     let Some(ch) = char::from_u32(c) else { return Some(0) };
                     if !ch.is_control() && self.git_commit_msg.chars().count() < 80 {
                         self.git_commit_msg.push(ch);
+                        self.kick();
+                    }
+                    return Some(0);
+                }
+            },
+            View::NoteModal => match c {
+                8 => {
+                    self.note_text.pop();
+                    self.kick();
+                    return Some(0);
+                }
+                13 | 27 | 9 => return Some(0),
+                _ => {
+                    let Some(ch) = char::from_u32(c) else { return Some(0) };
+                    if !ch.is_control() && self.note_text.chars().count() < 68 {
+                        self.note_text.push(ch);
                         self.kick();
                     }
                     return Some(0);
@@ -3473,9 +2578,11 @@ impl App {
                     match self.hit_at(x, y) {
                         Some(Hit::Project(i))
                         | Some(Hit::ProjServer(i))
+                        | Some(Hit::ProjServerRole(i, _))
                         | Some(Hit::ProjServerTerm(i))
                         | Some(Hit::ProjPort(i, _))
                         | Some(Hit::ProjGit(i))
+                        | Some(Hit::ProjNote(i))
                         | Some(Hit::ProjTerm(i))
                         | Some(Hit::ProjExplorer(i))
                         | Some(Hit::ProjPin(i)) => self.project_menu(i),
@@ -3546,6 +2653,7 @@ impl App {
                                 | View::Settings
                                 | View::Wizard
                                 | View::GitModal
+                                | View::NoteModal
                                 | View::CustomEditor
                         )
                     {

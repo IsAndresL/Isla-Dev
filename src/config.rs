@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-pub const APP_VERSION: &str = "v0.2.0";
+pub const APP_VERSION: &str = "v0.3.0";
 pub const APP_AUTHOR: &str = "Desarrollado por Ing. Andres Luna";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -78,6 +78,10 @@ pub struct Project {
     pub last_opened: u64,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_path: Option<String>,
 }
 
 impl Config {
@@ -100,8 +104,27 @@ impl Config {
     }
     pub fn sync_scanned_projects(&mut self, scanned: Vec<Project>) -> bool {
         let mut changed = false;
+
+        // 1. Eliminar automáticamente proyectos cuya carpeta haya sido borrada manualmente en el Explorador
+        let before_len = self.projects.len();
+        self.projects.retain(|p| std::path::Path::new(&p.path).is_dir());
+        if self.projects.len() != before_len {
+            changed = true;
+        }
+
+        // 2. Agregar carpetas nuevas y actualizar stack si antes era "Solo carpeta"
         for p in scanned {
-            if !self.projects.iter().any(|existing| existing.path.eq_ignore_ascii_case(&p.path)) {
+            if let Some(existing) = self
+                .projects
+                .iter_mut()
+                .find(|existing| existing.path.eq_ignore_ascii_case(&p.path))
+            {
+                if existing.stack == "Solo carpeta" && p.stack != "Solo carpeta" {
+                    existing.stack = p.stack;
+                    existing.color = p.color;
+                    changed = true;
+                }
+            } else {
                 self.projects.push(p);
                 changed = true;
             }

@@ -13,6 +13,8 @@ use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Com::*;
+use windows::Win32::System::DataExchange::*;
+use windows::Win32::System::Memory::*;
 use windows::Win32::System::Registry::*;
 use windows::Win32::System::Threading::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -43,8 +45,32 @@ pub struct OpenProjectWindow {
     pub hwnd: isize,
 }
 
+#[derive(Clone, Debug)]
+pub struct DevTarget {
+    pub label: String,
+    pub cwd: PathBuf,
+    pub cmd: String,
+    pub port: u16,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FullStackInfo {
+    pub main: Option<DevTarget>,
+    pub front: Option<DevTarget>,
+    pub back: Option<DevTarget>,
+}
+
+impl FullStackInfo {
+    pub fn is_fullstack(&self) -> bool {
+        self.front.is_some() && self.back.is_some()
+    }
+    pub fn has_any(&self) -> bool {
+        self.front.is_some() || self.back.is_some() || self.main.is_some()
+    }
+}
+
 pub enum WorkMsg {
-    Progress(String),
+    Progress(f32, String),
     Done {
         res: std::result::Result<PathBuf, String>,
         warn: Option<(String, PathBuf)>,
@@ -408,6 +434,8 @@ pub fn scan_base_dir(base: &Path) -> Vec<Project> {
             launcher: None,
             last_opened: 0,
             pinned: false,
+            note: None,
+            linked_path: None,
         });
     }
     list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -430,6 +458,8 @@ pub fn scaffold(
         notify_hwnd(hwnd);
     };
     let mut warnings: Vec<String> = Vec::new();
+    let total_steps = (tpl.create.len() + tpl.setup.len() + libs.len() + if auto_github { 1 } else { 0 }).max(1) as f32;
+    let mut cur_step = 0.0f32;
 
     let res = (|| -> std::result::Result<PathBuf, String> {
         let proj = base.join(&name);
@@ -441,27 +471,45 @@ pub fn scaffold(
         }
         for c in &tpl.create {
             let cmd_str = v(c);
-            post(&tx, WorkMsg::Progress(format!("> {}", short(&cmd_str))));
+            cur_step += 1.0;
+            post(
+                &tx,
+                WorkMsg::Progress((cur_step / total_steps * 0.92).clamp(0.10, 0.92), format!("> {}", short(&cmd_str))),
+            );
             run_logged(&cmd_str, &base, &mut logf, &log)?;
         }
         fs::create_dir_all(&proj).map_err(|e| e.to_string())?;
         for c in &tpl.setup {
             let cmd_str = v(c);
-            post(&tx, WorkMsg::Progress(format!("> {}", short(&cmd_str))));
+            cur_step += 1.0;
+            post(
+                &tx,
+                WorkMsg::Progress((cur_step / total_steps * 0.92).clamp(0.18, 0.92), format!("> {}", short(&cmd_str))),
+            );
             if let Err(e) = run_logged(&cmd_str, &proj, &mut logf, &log) {
                 warnings.push(format!("Setup: {e}"));
             }
         }
         for l in &libs {
             let cmd_str = v(&l.command);
-            post(&tx, WorkMsg::Progress(format!("Instalando {} · > {}", l.name, short(&cmd_str))));
+            cur_step += 1.0;
+            post(
+                &tx,
+                WorkMsg::Progress(
+                    (cur_step / total_steps * 0.92).clamp(0.25, 0.92),
+                    format!("Instalando {} · > {}", l.name, short(&cmd_str)),
+                ),
+            );
             if let Err(_) = run_logged(&cmd_str, &proj, &mut logf, &log) {
                 let reason = extract_last_error_reason(&log);
                 warnings.push(format!("Librería '{}': {}", l.name, reason));
             }
         }
         if auto_github {
-            post(&tx, WorkMsg::Progress("Subiendo proyecto a GitHub (git init + commit + gh)…".into()));
+            post(
+                &tx,
+                WorkMsg::Progress(0.94, "Subiendo proyecto a GitHub (git init + commit + gh)…".into()),
+            );
             ensure_project_has_initial_file(&proj, &name);
             let _ = run_logged("git init", &proj, &mut logf, &log);
             let _ = run_logged("git branch -M main", &proj, &mut logf, &log);
@@ -491,6 +539,122 @@ pub fn scaffold(
         Some((warnings.join(" | "), log))
     };
     post(&tx, WorkMsg::Done { res, warn });
+}
+
+/// Clona un repositorio de GitHub desde una URL en `base_dir`, instala dependencias automáticamente si tiene `package.json` y lo abre.
+pub fn git_clone_repo(
+    url: String,
+    repo_name: String,
+    base: PathBuf,
+    log: PathBuf,
+    tx: Sender<WorkMsg>,
+    hwnd: isize,
+) {
+    let post = |tx: &Sender<WorkMsg>, m: WorkMsg| {
+        let _ = tx.send(m);
+        notify_hwnd(hwnd);
+    };
+    let mut warnings: Vec<String> = Vec::new();
+    let res = (|| -> std::result::Result<PathBuf, String> {
+        fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+        let mut logf = File::create(&log).map_err(|e| e.to_string())?;
+        let proj = base.join(&repo_name);
+        post(
+            &tx,
+            WorkMsg::Progress(0.25, format!("Clonando {repo_name} desde GitHub…")),
+        );
+        run_logged(&format!("git clone \"{url}\" \"{repo_name}\""), &base, &mut logf, &log)?;
+        if proj.join("package.json").is_file() {
+            let pm = detect_package_manager(&proj);
+            let install_cmd = format!("{pm} install");
+            post(
+                &tx,
+                WorkMsg::Progress(0.72, format!("Instalando dependencias ({install_cmd})…")),
+            );
+            if let Err(_) = run_logged(&install_cmd, &proj, &mut logf, &log) {
+                let reason = extract_last_error_reason(&log);
+                warnings.push(format!("Dependencias ({install_cmd}): {reason}"));
+            }
+        }
+        Ok(proj)
+    })();
+    let warn = if warnings.is_empty() {
+        None
+    } else {
+        Some((warnings.join(" | "), log))
+    };
+    post(&tx, WorkMsg::Done { res, warn });
+}
+
+/// Detecta si el portapapeles de Windows contiene una URL válida de un repositorio de GitHub (`https://github.com/user/repo` o `git@github.com:user/repo`).
+pub fn read_clipboard_github_repo(hwnd: HWND) -> Option<(String, String)> {
+    let raw = unsafe {
+        if OpenClipboard(hwnd).is_err() {
+            return None;
+        }
+        let mut text_opt = None;
+        if let Ok(hdata) = GetClipboardData(13u32) {
+            let hmem = HGLOBAL(hdata.0);
+            let ptr = GlobalLock(hmem) as *const u16;
+            if !ptr.is_null() {
+                let mut len = 0usize;
+                while len < 512 && *ptr.add(len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(ptr, len);
+                text_opt = Some(String::from_utf16_lossy(slice));
+                let _ = GlobalUnlock(hmem);
+            }
+        }
+        let _ = CloseClipboard();
+        text_opt?
+    };
+
+    let t = raw.trim();
+    if t.contains('\n') || t.len() > 220 {
+        return None;
+    }
+    let clean = t
+        .strip_prefix("git clone ")
+        .or_else(|| t.strip_prefix("gh repo clone "))
+        .unwrap_or(t)
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'');
+
+    let repo_part = if let Some(rest) = clean
+        .strip_prefix("https://github.com/")
+        .or_else(|| clean.strip_prefix("http://github.com/"))
+        .or_else(|| clean.strip_prefix("github.com/"))
+    {
+        rest
+    } else if let Some(rest) = clean.strip_prefix("git@github.com:") {
+        rest
+    } else {
+        return None;
+    };
+
+    let mut segs = repo_part.split('/').filter(|s| !s.is_empty());
+    let owner = segs.next()?;
+    let raw_repo = segs.next()?;
+    let repo_name = raw_repo.trim_end_matches(".git").trim();
+    if owner.is_empty()
+        || repo_name.is_empty()
+        || matches!(
+            owner,
+            "settings" | "orgs" | "notifications" | "explore" | "marketplace" | "login" | "pulls" | "issues"
+        )
+    {
+        return None;
+    }
+    if !repo_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return None;
+    }
+    let clone_url = format!("https://github.com/{owner}/{repo_name}.git");
+    Some((repo_name.to_string(), clone_url))
 }
 
 /// Detecta el stack de una carpeta existente.
@@ -681,6 +845,10 @@ pub fn git_commit_and_push(
     hwnd: isize,
 ) {
     std::thread::spawn(move || {
+        let post = |tx: &Sender<WorkMsg>, m: WorkMsg| {
+            let _ = tx.send(m);
+            notify_hwnd(hwnd);
+        };
         let log_path = config::logs_dir().join(format!("git-{}.log", safe_slug(&name)));
         let Ok(mut logf) = File::create(&log_path) else { return };
 
@@ -689,6 +857,7 @@ pub fn git_commit_and_push(
         };
 
         let res = (|| -> std::result::Result<String, String> {
+            post(&tx, WorkMsg::Progress(0.20, format!("Preparando cambios Git en {name}…")));
             ensure_project_has_initial_file(&path, &name);
             if !path.join(".git").exists() {
                 step("git init", &mut logf)?;
@@ -701,6 +870,7 @@ pub fn git_commit_and_push(
             } else {
                 commit_msg.trim().replace('"', "'")
             };
+            post(&tx, WorkMsg::Progress(0.50, format!("Creando commit '{msg_clean}'…")));
             // Hacer commit si hay cambios pendientes o si aún no existe ningún commit en HEAD
             let status_out = Command::new("git")
                 .args(["status", "--porcelain"])
@@ -730,6 +900,7 @@ pub fn git_commit_and_push(
             let has_remote = read_git_remote(&path).is_some();
             if !has_remote || create_gh_repo {
                 if !has_remote {
+                    post(&tx, WorkMsg::Progress(0.80, format!("Creando repositorio {name} en GitHub…")));
                     let vis = if is_public { "--public" } else { "--private" };
                     step(
                         &format!("gh repo create \"{name}\" {vis} --source=. --remote=origin --push"),
@@ -739,10 +910,12 @@ pub fn git_commit_and_push(
                 }
             }
 
+            post(&tx, WorkMsg::Progress(0.82, format!("Subiendo cambios a GitHub (git push)…")));
             step("git push -u origin HEAD", &mut logf)?;
             Ok(format!("Commit '{}' subido a GitHub", short(&msg_clean)))
         })();
 
+        post(&tx, WorkMsg::Progress(0.0, String::new()));
         match res {
             Ok(msg) => {
                 let _ = tx.send(WorkMsg::Toast {
@@ -768,8 +941,21 @@ pub fn git_commit_and_push(
 }
 
 // ============================================================================
-// 2. SCRIPTS DE PACKAGE.JSON Y ACCIONES SECUNDARIAS RÁPIDAS
+// 2. GESTORES DE PAQUETES (PNPM / BUN / YARN / NPM), SCRIPTS Y PARES FULL-STACK
 // ============================================================================
+
+/// Detecta automáticamente el gestor de paquetes de un directorio según su archivo de lock (`bun`, `pnpm`, `yarn` o `npm`).
+pub fn detect_package_manager(path: &Path) -> &'static str {
+    if path.join("bun.lockb").is_file() || path.join("bun.lock").is_file() {
+        "bun"
+    } else if path.join("pnpm-lock.yaml").is_file() {
+        "pnpm"
+    } else if path.join("yarn.lock").is_file() {
+        "yarn"
+    } else {
+        "npm"
+    }
+}
 
 pub fn detect_package_scripts(path: &Path) -> Vec<(String, String)> {
     let Ok(content) = fs::read_to_string(path.join("package.json")) else {
@@ -834,11 +1020,12 @@ pub fn detect_package_scripts(path: &Path) -> Vec<(String, String)> {
 
 pub fn detect_dev_command(path: &Path, stack: &str) -> Option<(String, u16)> {
     let scripts = detect_package_scripts(path);
+    let pm = detect_package_manager(path);
     let default_port = if stack.contains("Astro") {
         4321
     } else if stack.contains("Angular") {
         4200
-    } else if stack.contains("Vite") || stack.contains("Vue") || stack.contains("Svelte") || stack.contains("TypeScript") {
+    } else if stack.contains("Vite") || stack.contains("Vue") || stack.contains("Svelte") || stack.contains("TypeScript") || stack.contains("React") {
         5173
     } else if stack.contains("Python") {
         8000
@@ -847,10 +1034,20 @@ pub fn detect_dev_command(path: &Path, stack: &str) -> Option<(String, u16)> {
     };
 
     if scripts.iter().any(|(k, _)| k == "dev") {
-        return Some(("npm run dev".into(), default_port));
+        let cmd = if pm == "yarn" {
+            "yarn dev".to_string()
+        } else {
+            format!("{pm} run dev")
+        };
+        return Some((cmd, default_port));
     }
     if scripts.iter().any(|(k, _)| k == "start") {
-        return Some(("npm start".into(), default_port));
+        let cmd = if pm == "yarn" {
+            "yarn start".to_string()
+        } else {
+            format!("{pm} start")
+        };
+        return Some((cmd, default_port));
     }
     if path.join("manage.py").is_file() {
         return Some(("python manage.py runserver".into(), 8000));
@@ -864,7 +1061,138 @@ pub fn detect_dev_command(path: &Path, stack: &str) -> Option<(String, u16)> {
     if path.join("Cargo.toml").is_file() {
         return Some(("cargo run".into(), 8080));
     }
+    if path.join("go.mod").is_file() {
+        return Some(("go run .".into(), 8080));
+    }
     None
+}
+
+/// Detecta si un proyecto tiene un servidor principal, o si es un proyecto Full-Stack con Frontend y Backend
+/// (por subcarpetas `frontend/` + `backend/`, `client/` + `server/`, `web/` + `api/`, raíz + `server/`, o vinculado con otro proyecto).
+pub fn detect_project_targets(proj_path: &Path, stack: &str, linked_path: Option<&str>) -> FullStackInfo {
+    let main = detect_dev_command(proj_path, stack).map(|(cmd, port)| DevTarget {
+        label: "Main".into(),
+        cwd: proj_path.to_path_buf(),
+        cmd,
+        port,
+    });
+
+    let front_candidates = ["frontend", "front", "client", "web", "ui", "app"];
+    let back_candidates = ["backend", "back", "server", "api", "servidor"];
+
+    let mut front_sub: Option<DevTarget> = None;
+    for sub in &front_candidates {
+        let p = proj_path.join(sub);
+        if p.is_dir() {
+            let (sub_stack, _) = detect(&p);
+            if let Some((cmd, port)) = detect_dev_command(&p, &sub_stack) {
+                front_sub = Some(DevTarget {
+                    label: "Front".into(),
+                    cwd: p,
+                    cmd,
+                    port,
+                });
+                break;
+            }
+        }
+    }
+
+    let mut back_sub: Option<DevTarget> = None;
+    for sub in &back_candidates {
+        let p = proj_path.join(sub);
+        if p.is_dir() {
+            let (sub_stack, _) = detect(&p);
+            if let Some((cmd, port)) = detect_dev_command(&p, &sub_stack) {
+                back_sub = Some(DevTarget {
+                    label: "Back".into(),
+                    cwd: p,
+                    cmd,
+                    port,
+                });
+                break;
+            }
+        }
+    }
+
+    // Caso 1: Tiene subcarpeta Front y subcarpeta Back
+    if front_sub.is_some() && back_sub.is_some() {
+        return FullStackInfo {
+            main,
+            front: front_sub,
+            back: back_sub,
+        };
+    }
+
+    // Caso 2: El proyecto raíz es Frontend y tiene subcarpeta Backend (`server/` o `api/`)
+    if main.is_some() && back_sub.is_some() {
+        let mut f = main.clone().unwrap();
+        f.label = "Front".into();
+        return FullStackInfo {
+            main,
+            front: Some(f),
+            back: back_sub,
+        };
+    }
+
+    // Caso 3: El proyecto raíz es Backend y tiene subcarpeta Frontend (`client/` o `web/`)
+    if main.is_some() && front_sub.is_some() {
+        let mut b = main.clone().unwrap();
+        b.label = "Back".into();
+        return FullStackInfo {
+            main,
+            front: front_sub,
+            back: Some(b),
+        };
+    }
+
+    // Caso 4: Está vinculado explícitamente con otro proyecto hermano (`linked_path`)
+    if let Some(lp) = linked_path {
+        let linked = Path::new(lp);
+        if linked.is_dir() {
+            let (l_stack, _) = detect(linked);
+            if let (Some(mut m_t), Some((l_cmd, l_port))) = (main.clone(), detect_dev_command(linked, &l_stack)) {
+                let is_main_front = stack.contains("React")
+                    || stack.contains("Vue")
+                    || stack.contains("Astro")
+                    || stack.contains("Angular")
+                    || stack.contains("Svelte")
+                    || stack.contains("Next");
+                if is_main_front {
+                    m_t.label = "Front".into();
+                    return FullStackInfo {
+                        main,
+                        front: Some(m_t),
+                        back: Some(DevTarget {
+                            label: "Back".into(),
+                            cwd: linked.to_path_buf(),
+                            cmd: l_cmd,
+                            port: l_port,
+                        }),
+                    };
+                } else {
+                    m_t.label = "Back".into();
+                    return FullStackInfo {
+                        main,
+                        front: Some(DevTarget {
+                            label: "Front".into(),
+                            cwd: linked.to_path_buf(),
+                            cmd: l_cmd,
+                            port: l_port,
+                        }),
+                        back: Some(m_t),
+                    };
+                }
+            }
+        }
+    }
+
+    // Caso 5: Solo tiene una subcarpeta con servidor pero no en la raíz
+    let fallback_main = main.or(front_sub).or(back_sub);
+    FullStackInfo {
+        main: fallback_main,
+        front: None,
+        back: None,
+    }
 }
 
 pub fn open_terminal_at(path: &Path) {
@@ -894,8 +1222,14 @@ pub fn open_browser(url: &str) {
 
 pub fn run_npm_script_in_terminal(path: &Path, script: &str) {
     let p_str = path.to_string_lossy();
+    let pm = detect_package_manager(path);
+    let run_cmd = if pm == "yarn" {
+        format!("yarn {script}")
+    } else {
+        format!("{pm} run {script}")
+    };
     let _ = Command::new("cmd")
-        .args(["/C", "wt", "-d", &p_str, "cmd", "/k", &format!("npm run {script}")])
+        .args(["/C", "wt", "-d", &p_str, "cmd", "/k", &run_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 }
