@@ -14,6 +14,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Registry::*;
+use windows::Win32::System::Threading::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -29,6 +30,17 @@ pub struct GitInfo {
     pub dirty: bool,
     pub changed_count: usize,
     pub remote_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpenProjectWindow {
+    pub project_idx: usize,
+    pub project_name: String,
+    pub project_path: String,
+    pub stack: String,
+    pub program_name: String,
+    pub is_ide: bool,
+    pub hwnd: isize,
 }
 
 pub enum WorkMsg {
@@ -248,6 +260,28 @@ pub fn open_file(path: &Path) {
     let _ = Command::new("notepad").arg(path).spawn();
 }
 
+/// Codifica un script de PowerShell en Base64 UTF-16LE para pasarlo con `-EncodedCommand` sin problemas de espacios o comillas.
+fn encode_powershell_b64(script: &str) -> String {
+    let mut bytes = Vec::with_capacity(script.len() * 2);
+    for u in script.encode_utf16() {
+        bytes.push((u & 0xFF) as u8);
+        bytes.push((u >> 8) as u8);
+    }
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
 /// Abre una ventana de terminal mostrando en vivo el contenido de un archivo de log (comando ejecutado + salida/errores).
 pub fn open_log_in_terminal(title_label: &str, project_path: Option<&Path>, log_path: &Path) {
     let win_title = format!("IslaDev Terminal - {title_label}");
@@ -258,9 +292,7 @@ pub fn open_log_in_terminal(title_label: &str, project_path: Option<&Path>, log_
             hw = FindWindowW(None, &title_h).unwrap_or_default();
         }
         if !hw.0.is_null() {
-            let _ = ShowWindow(hw, SW_SHOW);
-            let _ = ShowWindow(hw, SW_RESTORE);
-            let _ = SetForegroundWindow(hw);
+            bring_hwnd_to_front(hw);
             return;
         }
     }
@@ -270,17 +302,53 @@ pub fn open_log_in_terminal(title_label: &str, project_path: Option<&Path>, log_
         .map(|p| p.to_string_lossy().replace('\'', "''"))
         .unwrap_or_else(|| ".".into());
     let title_esc = win_title.replace('\'', "''");
+    let is_live_srv = log_path
+        .file_name()
+        .map(|f| f.to_string_lossy().starts_with("srv-"))
+        .unwrap_or(false);
+    let wait_flag = if is_live_srv { "-Wait" } else { "" };
 
     let ps_cmd = format!(
         "$Host.UI.RawUI.WindowTitle = '{title_esc}'; \
-         if (Test-Path '{cwd_str}') {{ Set-Location '{cwd_str}' }}; \
-         if (Test-Path '{log_str}') {{ Get-Content -Path '{log_str}' -Encoding UTF8 -Wait }} \
-         else {{ Write-Host 'Aún no hay registros en el log.' }}"
+         if (Test-Path -LiteralPath '{cwd_str}') {{ Set-Location -LiteralPath '{cwd_str}' }}; \
+         if (Test-Path -LiteralPath '{log_str}') {{ Get-Content -LiteralPath '{log_str}' -Encoding UTF8 {wait_flag} }} \
+         else {{ Write-Host 'Aun no hay registros en el log.' }}"
     );
+    let b64 = encode_powershell_b64(&ps_cmd);
 
     let _ = Command::new("conhost.exe")
-        .args(["powershell.exe", "-NoLogo", "-NoExit", "-Command", &ps_cmd])
+        .args(["powershell.exe", "-NoLogo", "-NoExit", "-EncodedCommand", &b64])
         .spawn();
+}
+
+/// Garantiza que la carpeta del proyecto tenga al menos un archivo (`README.md`) antes de hacer commit inicial.
+fn ensure_project_has_initial_file(proj: &Path, name: &str) {
+    let has_files = fs::read_dir(proj)
+        .ok()
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy() != ".git")
+        })
+        .unwrap_or(false);
+    if !has_files {
+        let readme = proj.join("README.md");
+        let _ = fs::write(
+            &readme,
+            format!("# {name}\n\nProyecto creado con **Isla Dev**.\n"),
+        );
+    }
+}
+
+/// Verifica si el repositorio Git ya tiene al menos un commit en `HEAD`.
+fn git_has_head_commit(proj: &Path) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(proj)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn run_logged(line: &str, cwd: &Path, log: &mut File, log_path: &Path) -> std::result::Result<(), String> {
@@ -394,10 +462,20 @@ pub fn scaffold(
         }
         if auto_github {
             post(&tx, WorkMsg::Progress("Subiendo proyecto a GitHub (git init + commit + gh)…".into()));
+            ensure_project_has_initial_file(&proj, &name);
             let _ = run_logged("git init", &proj, &mut logf, &log);
             let _ = run_logged("git branch -M main", &proj, &mut logf, &log);
             let _ = run_logged("git add -A", &proj, &mut logf, &log);
-            let _ = run_logged("git commit -m \"Initial commit\"", &proj, &mut logf, &log);
+            if run_logged("git commit -m \"Initial commit\"", &proj, &mut logf, &log).is_err()
+                && !git_has_head_commit(&proj)
+            {
+                let _ = run_logged(
+                    "git -c user.name=\"Developer\" -c user.email=\"dev@users.noreply.github.com\" commit --allow-empty -m \"Initial commit\"",
+                    &proj,
+                    &mut logf,
+                    &log,
+                );
+            }
             let gh_cmd = format!("gh repo create \"{name}\" --private --source=. --remote=origin --push");
             if let Err(_) = run_logged(&gh_cmd, &proj, &mut logf, &log) {
                 let reason = extract_last_error_reason(&log);
@@ -611,6 +689,7 @@ pub fn git_commit_and_push(
         };
 
         let res = (|| -> std::result::Result<String, String> {
+            ensure_project_has_initial_file(&path, &name);
             if !path.join(".git").exists() {
                 step("git init", &mut logf)?;
                 let _ = step("git branch -M main", &mut logf);
@@ -622,15 +701,30 @@ pub fn git_commit_and_push(
             } else {
                 commit_msg.trim().replace('"', "'")
             };
-            // Hacer commit si hay cambios pendientes
+            // Hacer commit si hay cambios pendientes o si aún no existe ningún commit en HEAD
             let status_out = Command::new("git")
                 .args(["status", "--porcelain"])
                 .current_dir(&path)
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
                 .map_err(|e| e.to_string())?;
-            if !String::from_utf8_lossy(&status_out.stdout).trim().is_empty() {
-                step(&format!("git commit -m \"{msg_clean}\""), &mut logf)?;
+            let has_staged = !String::from_utf8_lossy(&status_out.stdout).trim().is_empty();
+            if has_staged {
+                if step(&format!("git commit -m \"{msg_clean}\""), &mut logf).is_err() {
+                    step(
+                        &format!(
+                            "git -c user.name=\"Developer\" -c user.email=\"dev@users.noreply.github.com\" commit --allow-empty -m \"{msg_clean}\""
+                        ),
+                        &mut logf,
+                    )?;
+                }
+            } else if !git_has_head_commit(&path) {
+                step(
+                    &format!(
+                        "git -c user.name=\"Developer\" -c user.email=\"dev@users.noreply.github.com\" commit --allow-empty -m \"{msg_clean}\""
+                    ),
+                    &mut logf,
+                )?;
             }
 
             let has_remote = read_git_remote(&path).is_some();
@@ -1342,33 +1436,400 @@ pub fn target_monitor_rect(mode: &str) -> RECT {
     }
 }
 
-/// Detecta si otra aplicación (juego o video) está en pantalla completa exclusiva/borderless sobre el monitor de la isla.
+/// Muestra un cuadro de confirmación nativo de Windows antes de eliminar por completo la carpeta de un proyecto del disco.
+pub fn confirm_delete_project(hwnd: HWND, name: &str, path: &str) -> bool {
+    let msg = format!(
+        "¿Estás seguro de que deseas ELIMINAR POR COMPLETO el proyecto \"{name}\" del disco?\n\n\
+         Carpeta a borrar:\n{path}\n\n\
+         Esta acción borrará permanentemente todos sus archivos y no se puede deshacer."
+    );
+    let title = "Eliminar proyecto del disco — Isla Dev";
+    unsafe {
+        let res = MessageBoxW(
+            hwnd,
+            &HSTRING::from(msg),
+            &HSTRING::from(title),
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND | MB_TOPMOST,
+        );
+        res == IDYES
+    }
+}
+
+/// Elimina físicamente la carpeta de un proyecto del disco.
+pub fn delete_project_from_disk(path: &Path) -> std::result::Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::remove_dir_all(path).map_err(|e| e.to_string())
+}
+
+/// Obtiene la ruta completa del ejecutable asociado a un PID (`QueryFullProcessImageNameW`).
+pub fn get_process_exe_path(pid: u32) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    unsafe {
+        let hproc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 512];
+        let mut size = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(hproc, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut size).is_ok();
+        let _ = CloseHandle(hproc);
+        if ok && size > 0 {
+            Some(String::from_utf16_lossy(&buf[..size as usize]))
+        } else {
+            None
+        }
+    }
+}
+
+/// Trae al frente una ventana existente sin des-maximizarla si ya estaba maximizada.
+pub fn bring_hwnd_to_front(hw: HWND) -> bool {
+    unsafe {
+        if hw.0.is_null() || !IsWindow(hw).as_bool() {
+            return false;
+        }
+        if IsIconic(hw).as_bool() {
+            let _ = ShowWindow(hw, SW_RESTORE);
+        } else {
+            let _ = ShowWindow(hw, SW_SHOW);
+        }
+        let fg = GetForegroundWindow();
+        let cur_tid = GetCurrentThreadId();
+        let fg_tid = if !fg.0.is_null() {
+            GetWindowThreadProcessId(fg, None)
+        } else {
+            0
+        };
+        let target_tid = GetWindowThreadProcessId(hw, None);
+        if fg_tid != 0 && fg_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, fg_tid, true);
+        }
+        if target_tid != 0 && target_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, target_tid, true);
+        }
+        let _ = BringWindowToTop(hw);
+        let _ = SetForegroundWindow(hw);
+        let _ = SetFocus(hw);
+        if fg_tid != 0 && fg_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, fg_tid, false);
+        }
+        if target_tid != 0 && target_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, target_tid, false);
+        }
+        true
+    }
+}
+
+/// Envía `WM_CLOSE` para cerrar limpiamente una ventana abierta desde la sección "Abiertos ahora".
+pub fn close_window_handle(hwnd: isize) {
+    unsafe {
+        let hw = HWND(hwnd as _);
+        if !hw.0.is_null() && IsWindow(hw).as_bool() {
+            let _ = PostMessageW(hw, WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// Identifica en qué programa está abierta una ventana y si corresponde a un IDE/editor de código.
+fn detect_window_program(title: &str, cname: &str, exe_path: &str) -> Option<(String, bool)> {
+    let t_low = title.to_lowercase();
+    let e_low = exe_path.to_lowercase();
+
+    if e_low.contains("antigravity ide")
+        || t_low.ends_with(" - antigravity ide")
+        || t_low.ends_with(" - antigravity")
+        || t_low.ends_with(" — antigravity")
+        || (e_low.contains("antigravity") && (title.contains(" - ") || title.contains(" — ")))
+    {
+        return Some(("Antigravity IDE".into(), true));
+    }
+    if e_low.ends_with("\\code.exe")
+        || t_low.contains("visual studio code")
+        || t_low.ends_with(" - vs code")
+    {
+        return Some(("VS Code".into(), true));
+    }
+    if e_low.ends_with("\\cursor.exe") || t_low.ends_with(" - cursor") || t_low.ends_with(" — cursor") {
+        return Some(("Cursor".into(), true));
+    }
+    if e_low.ends_with("\\windsurf.exe") || t_low.ends_with(" - windsurf") {
+        return Some(("Windsurf".into(), true));
+    }
+    if e_low.contains("webstorm") || t_low.contains("webstorm") {
+        return Some(("WebStorm".into(), true));
+    }
+    if e_low.contains("idea64") || t_low.contains("intellij idea") {
+        return Some(("IntelliJ IDEA".into(), true));
+    }
+    if e_low.contains("pycharm") || t_low.contains("pycharm") {
+        return Some(("PyCharm".into(), true));
+    }
+    if e_low.contains("rider64") || t_low.contains("jetbrains rider") {
+        return Some(("Rider".into(), true));
+    }
+    if e_low.ends_with("\\zed.exe") || t_low.ends_with(" - zed") {
+        return Some(("Zed".into(), true));
+    }
+    if e_low.contains("sublime_text") || t_low.contains("sublime text") {
+        return Some(("Sublime Text".into(), true));
+    }
+    if e_low.contains("nvim") || e_low.contains("neovim") || t_low.contains("neovim") {
+        return Some(("Neovim".into(), true));
+    }
+    if cname == "CabinetWClass" {
+        return Some(("Explorador".into(), false));
+    }
+    if cname == "CASCADIA_HOSTING_WINDOW_CLASS" || cname == "ConsoleWindowClass" {
+        return Some(("Terminal".into(), false));
+    }
+    None
+}
+
+/// Comprueba si el título de una ventana corresponde exactamente al proyecto `proj_name` / `proj_path`.
+fn window_matches_project(title: &str, cname: &str, proj_name: &str, proj_path: &str) -> bool {
+    if proj_name.is_empty() {
+        return false;
+    }
+    let t_low = title.to_lowercase();
+    let p_path_low = proj_path.to_lowercase();
+    if !p_path_low.is_empty() && t_low.contains(&p_path_low) {
+        return true;
+    }
+    if title.eq_ignore_ascii_case(&format!("IslaDev Terminal - {proj_name}")) {
+        return true;
+    }
+
+    // Dividir el título por separadores estándar de editores (" - ", " — ", " | ")
+    for raw_seg in title.split(" - ").flat_map(|s| s.split(" — ")).flat_map(|s| s.split(" | ")) {
+        let mut seg = raw_seg
+            .trim()
+            .trim_start_matches('●')
+            .trim_start_matches('*')
+            .trim_start_matches('•')
+            .trim();
+        if let Some((before_br, _)) = seg.split_once(" [") {
+            seg = before_br.trim();
+        }
+        if let Some((before_par, _)) = seg.split_once(" (Workspace)") {
+            seg = before_par.trim();
+        }
+        if seg.eq_ignore_ascii_case(proj_name) {
+            return true;
+        }
+        if cname == "CabinetWClass" {
+            if let Some(last_comp) = seg.rsplit(['\\', '/']).next() {
+                if last_comp.trim().eq_ignore_ascii_case(proj_name) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Escanea todas las ventanas visibles del escritorio para detectar qué proyectos están abiertos actualmente y en qué programa.
+pub fn scan_open_project_windows_sync(projects: &[Project], our_hwnd: HWND) -> Vec<OpenProjectWindow> {
+    struct EnumCtx<'a> {
+        projects: &'a [Project],
+        our_hwnd: HWND,
+        out: Vec<OpenProjectWindow>,
+    }
+
+    unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam.0 as *mut EnumCtx);
+        if hwnd == ctx.our_hwnd || !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+        let len = GetWindowTextLengthW(hwnd);
+        if len <= 0 {
+            return BOOL(1);
+        }
+        let mut tbuf = vec![0u16; (len + 1) as usize];
+        let read_len = GetWindowTextW(hwnd, &mut tbuf);
+        if read_len <= 0 {
+            return BOOL(1);
+        }
+        let title = String::from_utf16_lossy(&tbuf[..read_len as usize]);
+
+        let mut cbuf = [0u16; 64];
+        let clen = GetClassNameW(hwnd, &mut cbuf);
+        let cname = String::from_utf16_lossy(&cbuf[..clen as usize]);
+        if matches!(
+            cname.as_str(),
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        ) {
+            return BOOL(1);
+        }
+
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let exe_path = get_process_exe_path(pid).unwrap_or_default();
+
+        let Some((program_name, is_ide)) = detect_window_program(&title, &cname, &exe_path) else {
+            return BOOL(1);
+        };
+
+        // Buscar el proyecto cuyo nombre sea más específico (más largo primero para evitar colisiones de prefijos)
+        let mut best_match: Option<usize> = None;
+        let mut best_len = 0usize;
+        for (idx, p) in ctx.projects.iter().enumerate() {
+            if window_matches_project(&title, &cname, &p.name, &p.path) && p.name.len() >= best_len {
+                best_len = p.name.len();
+                best_match = Some(idx);
+            }
+        }
+
+        if let Some(proj_idx) = best_match {
+            let p = &ctx.projects[proj_idx];
+            let already = ctx
+                .out
+                .iter()
+                .any(|w| w.project_idx == proj_idx && w.program_name == program_name);
+            if !already {
+                ctx.out.push(OpenProjectWindow {
+                    project_idx: proj_idx,
+                    project_name: p.name.clone(),
+                    project_path: p.path.clone(),
+                    stack: p.stack.clone(),
+                    program_name,
+                    is_ide,
+                    hwnd: hwnd.0 as isize,
+                });
+            }
+        }
+        BOOL(1)
+    }
+
+    let mut ctx = EnumCtx {
+        projects,
+        our_hwnd,
+        out: Vec::new(),
+    };
+    unsafe {
+        let _ = EnumWindows(Some(enum_cb), LPARAM(&mut ctx as *mut _ as isize));
+    }
+    ctx.out
+}
+
+/// Si el proyecto ya está abierto en un editor/programa compatible, enfoca esa ventana en lugar de abrir una duplicada.
+pub fn focus_existing_project_window(
+    projects: &[Project],
+    proj_idx: usize,
+    launcher_id: &str,
+    our_hwnd: HWND,
+) -> Option<String> {
+    let open = scan_open_project_windows_sync(projects, our_hwnd);
+    let candidates: Vec<&OpenProjectWindow> = open.iter().filter(|w| w.project_idx == proj_idx).collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let target = if launcher_id == "explorer" {
+        candidates.iter().copied().find(|w| w.program_name == "Explorador")
+    } else if launcher_id == "terminal" {
+        candidates.iter().copied().find(|w| w.program_name == "Terminal")
+    } else {
+        // Preferir el IDE que coincida con el launcher solicitado, o cualquier IDE abierto para ese proyecto
+        let pref = match launcher_id {
+            "antigravity" => "Antigravity IDE",
+            "vscode" => "VS Code",
+            "cursor" => "Cursor",
+            _ => "",
+        };
+        candidates
+            .iter()
+            .copied()
+            .find(|w| !pref.is_empty() && w.program_name.eq_ignore_ascii_case(pref))
+            .or_else(|| candidates.iter().copied().find(|w| w.is_ide))
+    };
+
+    if let Some(win) = target {
+        if bring_hwnd_to_front(HWND(win.hwnd as _)) {
+            return Some(win.program_name.clone());
+        }
+    }
+    None
+}
+
+/// Detecta si otra aplicación (juego o video) está en pantalla completa exclusiva/borderless sobre el monitor de la isla,
+/// ignorando siempre la barra de tareas, bandeja del sistema ("Mostrar iconos ocultos"), menú Inicio y ventanas de Explorer.
 pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
     unsafe {
         let fg = GetForegroundWindow();
-        if fg.0.is_null() || fg == our_hwnd || !IsWindowVisible(fg).as_bool() {
+        if fg.0.is_null() || fg == our_hwnd || !IsWindowVisible(fg).as_bool() || IsIconic(fg).as_bool() {
             return false;
         }
-        let mut cls = [0u16; 64];
+        let mut cls = [0u16; 96];
         let len = GetClassNameW(fg, &mut cls);
         let cname = String::from_utf16_lossy(&cls[..len as usize]);
-        if matches!(
-            cname.as_str(),
-            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Windows.UI.Core.CoreWindow"
-        ) {
+        let clow = cname.to_lowercase();
+        if cname.is_empty()
+            || matches!(
+                cname.as_str(),
+                "Progman"
+                    | "WorkerW"
+                    | "Shell_TrayWnd"
+                    | "Shell_SecondaryTrayWnd"
+                    | "NotifyIconOverflowWindow"
+                    | "TopLevelWindowForOverflowXamlIsland"
+                    | "XamlExplorerHostIslandWindow"
+                    | "Windows.UI.Core.CoreWindow"
+                    | "Windows.UI.Composition.DesktopWindowContentBridge"
+                    | "Windows.UI.Input.InputSite.WindowClass"
+                    | "ApplicationFrameWindow"
+                    | "CabinetWClass"
+            )
+            || clow.contains("tray")
+            || clow.contains("xaml")
+            || clow.contains("shell")
+            || clow.contains("notifyicon")
+            || clow.contains("corewindow")
+            || clow.contains("tooltip")
+        {
             return false;
         }
+
+        let ex_style = GetWindowLongW(fg, GWL_EXSTYLE) as u32;
+        if (ex_style & WS_EX_TOOLWINDOW.0) != 0
+            || (ex_style & WS_EX_NOACTIVATE.0) != 0
+            || (ex_style & WS_EX_TRANSPARENT.0) != 0
+        {
+            return false;
+        }
+
+        // Nunca ocultar por procesos del propio Shell de Windows (explorer.exe, barra de tareas, bandeja, menú inicio)
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if let Some(exe) = get_process_exe_path(pid) {
+            let elow = exe.to_lowercase();
+            if elow.ends_with("\\explorer.exe")
+                || elow.ends_with("\\shellexperiencehost.exe")
+                || elow.ends_with("\\startmenuexperiencehost.exe")
+                || elow.ends_with("\\searchhost.exe")
+                || elow.ends_with("\\textinputhost.exe")
+                || elow.ends_with("\\applicationframehost.exe")
+                || elow.ends_with("\\widgets.exe")
+                || elow.ends_with("\\lockapp.exe")
+                || elow.ends_with("\\systemsettings.exe")
+                || elow.contains("isla-dev")
+                || elow.contains("isladev")
+            {
+                return false;
+            }
+        }
+
         let mut rc = RECT::default();
         if GetWindowRect(fg, &mut rc).is_err() {
             return false;
         }
         let style = GetWindowLongW(fg, GWL_STYLE) as u32;
         let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
+        let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
         let covers_monitor = rc.left <= mon_rc.left
             && rc.top <= mon_rc.top
             && rc.right >= mon_rc.right
             && rc.bottom >= mon_rc.bottom;
-        covers_monitor && !has_caption
+        covers_monitor && !has_caption && !has_thickframe
     }
 }
 
