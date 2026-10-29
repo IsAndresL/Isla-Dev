@@ -94,3 +94,4 @@ if __name__ == '__main__':
         target = os.path.join(base, "target", "x86_64-pc-windows-gnu", "release", "isla-dev.exe")
         
     embed_icon(target, ico)
+
