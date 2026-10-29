@@ -815,10 +815,11 @@ impl App {
         let (w, h, r) = match self.view {
             View::Compact => {
                 if self.hov(Hit::Pill) {
-                    // Modo "Pre-vista en Píldora" (Estilo iPhone 16 Pro) al pasar el ratón por la gota
-                    (244.0, 32.0, 16.0)
-                } else if self.bg_progress.is_some() {
-                    (66.0, 13.0, 6.5)
+                    if self.has_live_server() {
+                        (96.0, 24.0, 12.0)
+                    } else {
+                        (78.0, 24.0, 12.0)
+                    }
                 } else if self.has_live_server() {
                     (54.0, 10.0, 5.0)
                 } else {

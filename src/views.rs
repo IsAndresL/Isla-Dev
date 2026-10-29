@@ -21,7 +21,7 @@ impl App {
                 g.fill_path(&path, BODY, 1.0);
             }
             if let Ok(curve) = g.waterdrop_curve_path(cx, w, h) {
-                let border_col = if self.has_live_server() && w <= 110.0 {
+                let border_col = if self.has_live_server() {
                     GREEN
                 } else {
                     WHITE
@@ -85,78 +85,10 @@ impl App {
         let g = &self.gfx;
         let srv_count = self.active_server_count();
         let live = srv_count > 0;
+        let expanded_pill = h > 16.0;
 
-        // Modo "Pre-vista en Píldora" (Estilo iPhone 16 Pro) al pasar el ratón por la gota
-        if w > 115.0 && h >= 20.0 {
-            let fade = ((w - 115.0) / 95.0).clamp(0.0, 1.0);
-            let left_x = cx - w * 0.5 + 18.0;
-            let cy = y + h * 0.5;
-
-            // Determinar el proyecto activo (abierto actualmente o el más reciente)
-            let preview_proj = self
-                .open_windows
-                .first()
-                .and_then(|ow| self.cfg.projects.get(ow.project_idx))
-                .or_else(|| self.cfg.projects.first());
-
-            if let Some(p) = preview_proj {
-                g.draw_stack_icon_only(&p.stack, left_x, cy - 7.5, 15.0);
-                let name_max_w = (w - 122.0).max(50.0);
-                g.text(
-                    &p.name,
-                    &g.f.badge,
-                    left_x + 19.0,
-                    y,
-                    name_max_w,
-                    h,
-                    WHITE,
-                    0.95 * fade,
-                );
-            } else {
-                g.draw_logo(left_x, cy - 8.0, 16.0, 16.0, 0.95 * fade);
-                g.text("Isla Dev", &g.f.badge, left_x + 20.0, y, 80.0, h, WHITE, 0.95 * fade);
-            }
-
-            // Indicador derecho en la píldora de pre-vista: servidor activo o IDE abierto
-            let right_edge = cx + w * 0.5 - 16.0;
-            if live {
-                let badge_txt = if let Some(port) = self.primary_live_port() {
-                    if srv_count > 1 {
-                        format!(":{port} +{}", srv_count - 1)
-                    } else {
-                        format!(":{port}")
-                    }
-                } else {
-                    format!("{srv_count} LIVE")
-                };
-                let bw = (g.measure(&badge_txt, &g.f.tiny) + 20.0).clamp(46.0, 78.0);
-                let bx = right_edge - bw;
-                let by = cy - 9.0;
-                g.rrect(bx, by, bw, 18.0, 9.0, GREEN, 0.18 * fade);
-                g.rrect_stroke(bx, by, bw, 18.0, 9.0, GREEN, 0.55 * fade, 1.0);
-                g.circle(bx + 8.0, cy, 3.0, GREEN, fade);
-                g.text(&badge_txt, &g.f.tiny, bx + 14.0, by, bw - 16.0, 18.0, GREEN, fade);
-            } else if let Some(ow) = self.open_windows.first() {
-                let ide_short = if ow.program_name.contains("Antigravity") {
-                    "Antigravity"
-                } else if ow.program_name.contains("VS Code") {
-                    "VS Code"
-                } else {
-                    &ow.program_name
-                };
-                let bw = (g.measure(ide_short, &g.f.tiny) + 18.0).clamp(48.0, 82.0);
-                let bx = right_edge - bw;
-                let by = cy - 9.0;
-                g.rrect(bx, by, bw, 18.0, 9.0, WHITE, 0.08 * fade);
-                g.circle(bx + 7.5, cy, 2.6, GREEN, 0.9 * fade);
-                g.text(ide_short, &g.f.tiny, bx + 13.0, by, bw - 15.0, 18.0, GRAY, fade);
-            } else {
-                let txt = format!("{} proy.", self.cfg.projects.len());
-                let bw = g.measure(&txt, &g.f.tiny) + 12.0;
-                g.text(&txt, &g.f.tiny, right_edge - bw, y, bw, h, GRAY, 0.85 * fade);
-            }
-        } else if live {
-            let dot_r = 2.6;
+        if live {
+            let dot_r = if expanded_pill { 3.4 } else { 2.6 };
             let positions = Self::waterdrop_dot_positions(cx, w, h, srv_count, dot_r);
             for (dx, dy) in positions {
                 g.circle(dx, y + dy, dot_r + 1.8, GREEN, 0.25);
