@@ -18,10 +18,11 @@ OutputBaseFilename=IslaDev-Setup-0.1.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\logo\app.ico
 InfoBeforeFile=requisitos.txt
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayIcon={app}\app.ico
 CloseApplications=no
 RestartApplications=no
 
@@ -35,13 +36,14 @@ Name: "ghlogin"; Description: "Abrir terminal para iniciar sesión en GitHub CLI
 
 [Files]
 Source: "..\target\x86_64-pc-windows-gnu\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\logo\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requisitos.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"
 Name: "{group}\Requisitos y Guía de Configuración"; Filename: "{app}\requisitos.txt"
 Name: "{group}\Desinstalar {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "IslaDev"; ValueData: """{app}\{#AppExe}"""; Tasks: startup; Flags: uninsdeletevalue
