@@ -1,8 +1,11 @@
 [package]
 name = "isla-dev"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Isla dinámica nativa para abrir y crear proyectos de desarrollo"
+license = "MIT"
+authors = ["Ing. Andres Luna"]
+repository = "https://github.com/IsAndresL/Isla-Dev"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
