@@ -2,7 +2,7 @@
 ; Compilar:  ISCC installer\isla.iss   (después de cargo build --release)
 
 #define AppName "Isla Dev"
-#define AppVersion "0.2.0"
+#define AppVersion "0.3.0"
 #define AppExe "isla-dev.exe"
 
 [Setup]
@@ -22,7 +22,8 @@ InfoBeforeFile=requisitos.txt
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExe}
-CloseApplications=yes
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
@@ -52,3 +53,14 @@ Filename: "{app}\{#AppExe}"; Description: "Abrir {#AppName} ahora"; Flags: nowai
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM {#AppExe}"; Flags: runhidden; RunOnceId: "KillIsla"
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM isla-dev.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM isla-dev-portable.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(250);
+  Result := '';
+end;

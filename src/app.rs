@@ -2732,6 +2732,11 @@ impl App {
                     self.kick();
                     None
                 }
+                WM_QUERYENDSESSION => Some(1),
+                WM_CLOSE | WM_DESTROY | WM_ENDSESSION => {
+                    self.quit();
+                    Some(0)
+                }
                 _ => None,
             }
         }
