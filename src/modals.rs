@@ -21,7 +21,7 @@ impl App {
             _ => "Monitor principal".to_string(),
         };
 
-        let items: [(Hit, &str, String, String, Option<bool>); 9] = [
+        let items: [(Hit, &str, String, String, Option<bool>); 10] = [
             (
                 Hit::ToggleVisibility,
                 G_POWER,
@@ -35,6 +35,13 @@ impl App {
                 "Auto-ocultar en pantalla completa".into(),
                 "Se oculta sola en juegos o videos a pantalla completa".into(),
                 Some(self.cfg.hide_on_fullscreen),
+            ),
+            (
+                Hit::ToggleSounds,
+                G_CHEV,
+                "Sonidos de interfaz (Micro-feedback)".into(),
+                "Micro-sonidos suaves estilo Windows 11 al interactuar".into(),
+                Some(self.cfg.sounds_enabled),
             ),
             (
                 Hit::CycleMonitor,
@@ -483,59 +490,105 @@ impl App {
             lx,
             y,
             tw,
-            &format!("Nota Rápida (Mini-TODO) · {}", p.name),
-            "Se mostrará debajo del nombre del proyecto para recordar qué te falta",
+            &format!("Bloc de Notas · {}", p.name),
+            "Notas, tareas pendientes, ideas y recordatorios del proyecto",
             true,
         );
 
-        let mut ry = y + 70.0;
+        let mut ry = y + 64.0;
         let bx = lx + 16.0;
         let bw = tw - 32.0;
+        let box_h = 180.0;
 
+        // Caja de texto amplia estilo tarjeta / textarea
+        g.rrect(bx, ry, bw, box_h, 10.0, 0x0C1017, 0.95);
+        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, box_h - 1.0, 10.0, ACCENT, 0.45, 1.0);
+        self.hit(bx, ry, bw, box_h, Hit::NoteInput);
+
+        let cur_count = self.note_text.chars().count();
+        if self.note_text.is_empty() {
+            g.text(
+                "Escribe notas, tareas pendientes, credenciales de prueba o recordatorios para este proyecto…\n\n• Shift+Enter para salto de línea\n• Ctrl+V para pegar\n• Enter para guardar",
+                &g.f.sub,
+                bx + 14.0,
+                ry + 14.0,
+                bw - 28.0,
+                box_h - 44.0,
+                DIM,
+                0.8,
+            );
+        } else {
+            // Visualización multilínea con cursor parpadeante
+            let blink = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0) / 530) % 2 == 0;
+            let display_text = if blink {
+                format!("{}|", self.note_text)
+            } else {
+                self.note_text.clone()
+            };
+            g.text(
+                &display_text,
+                &g.f.body,
+                bx + 14.0,
+                ry + 12.0,
+                bw - 28.0,
+                box_h - 38.0,
+                WHITE,
+                0.95,
+            );
+        }
+
+        // Barra inferior interna con contador de caracteres y atajos
+        let count_str = format!("{cur_count}/1000 caracteres · Shift+Enter = salto · Enter = guardar");
         g.text(
-            "Recordatorio o tarea pendiente del proyecto:",
-            &g.f.sub,
-            bx + 2.0,
-            ry,
-            bw,
-            18.0,
-            GRAY,
-            1.0,
+            &count_str,
+            &g.f.tiny,
+            bx + 14.0,
+            ry + box_h - 22.0,
+            bw - 28.0,
+            16.0,
+            if cur_count > 900 { AMBER } else { GRAY },
+            0.85,
         );
-        ry += 22.0;
+        ry += box_h + 16.0;
 
-        self.draw_input_box(
-            bx,
-            ry,
-            bw,
-            38.0,
-            "Ej. Falta conectar pasarela de pagos / Revisar login…",
-            &self.note_text,
-            true,
-            Hit::NoteInput,
-        );
-        ry += 52.0;
+        // Botones de acción: Guardar, Eliminar y Cancelar
+        let save_w = 210.0;
+        let del_w = 140.0;
+        let cancel_w = 110.0;
+        let spacing = 12.0;
 
-        let save_w = bw - 130.0;
         self.pill_action_btn(
             bx,
             ry,
             save_w,
-            40.0,
+            42.0,
             "✓ Guardar nota (Enter)",
             GREEN,
             true,
             Hit::NoteSave,
         );
         self.pill_action_btn(
-            bx + save_w + 10.0,
+            bx + save_w + spacing,
             ry,
-            120.0,
-            40.0,
-            "Borrar nota",
+            del_w,
+            42.0,
+            "🗑 Eliminar nota",
             RED,
             false,
             Hit::NoteClear,
+        );
+        self.pill_action_btn(
+            bx + save_w + del_w + spacing * 2.0,
+            ry,
+            cancel_w,
+            42.0,
+            "✕ Cancelar",
+            GRAY,
+            false,
+            Hit::Back,
         );
     }
 

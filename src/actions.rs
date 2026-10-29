@@ -435,6 +435,7 @@ pub fn scan_base_dir(base: &Path) -> Vec<Project> {
             last_opened: 0,
             pinned: false,
             note: None,
+            workspace: None,
             linked_path: None,
         });
     }
@@ -2239,4 +2240,101 @@ pub fn parse_hotkey(s: &str) -> Option<(HOT_KEY_MODIFIERS, u32)> {
         }
     }
     Some((m, vk?))
+}
+
+#[link(name = "winmm")]
+extern "system" {
+    fn PlaySoundW(pszSound: *const u16, hmod: isize, fdwSound: u32) -> BOOL;
+}
+
+pub fn play_ui_sound(sound_name: &str, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let filename = match sound_name {
+        "pop" | "expand" => r"C:\Windows\Media\Windows Pop-up Blocked.wav",
+        "click" | "tab" => r"C:\Windows\Media\Windows Navigation Start.wav",
+        "action" | "server" | "save" => r"C:\Windows\Media\Windows Notify Messaging.wav",
+        "delete" => r"C:\Windows\Media\Windows Recycle.wav",
+        _ => r"C:\Windows\Media\Windows Navigation Start.wav",
+    };
+    let wide: Vec<u16> = filename.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let _ = PlaySoundW(wide.as_ptr(), 0, 0x00020003); // SND_FILENAME | SND_ASYNC | SND_NODEFAULT
+    }
+}
+
+pub fn relative_time_string(last_opened: u64, path: &str) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let ts = if last_opened > 0 {
+        last_opened
+    } else {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    };
+
+    if ts == 0 || now < ts {
+        return "sin actividad".to_string();
+    }
+
+    let diff = now - ts;
+    if diff < 90 {
+        "hace 1 min".to_string()
+    } else if diff < 3600 {
+        format!("hace {} min", diff / 60)
+    } else if diff < 7200 {
+        "hace 1 h".to_string()
+    } else if diff < 86400 {
+        format!("hace {} h", diff / 3600)
+    } else if diff < 172800 {
+        "ayer".to_string()
+    } else if diff < 604800 {
+        format!("hace {} d", diff / 86400)
+    } else if diff < 2592000 {
+        let weeks = diff / 604800;
+        if weeks == 1 {
+            "hace 1 sem".to_string()
+        } else {
+            format!("hace {} sem", weeks)
+        }
+    } else {
+        let months = diff / 2592000;
+        if months == 1 {
+            "hace 1 mes".to_string()
+        } else {
+            format!("hace {} meses", months)
+        }
+    }
+}
+
+pub fn read_clipboard_text(hwnd: HWND) -> Option<String> {
+    unsafe {
+        if OpenClipboard(hwnd).is_err() {
+            return None;
+        }
+        let mut text_opt = None;
+        if let Ok(hdata) = GetClipboardData(13u32) {
+            let hmem = HGLOBAL(hdata.0);
+            let ptr = GlobalLock(hmem) as *const u16;
+            if !ptr.is_null() {
+                let mut len = 0usize;
+                while len < 4096 && *ptr.add(len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(ptr, len);
+                text_opt = Some(String::from_utf16_lossy(slice));
+                let _ = GlobalUnlock(hmem);
+            }
+        }
+        let _ = CloseClipboard();
+        text_opt
+    }
 }

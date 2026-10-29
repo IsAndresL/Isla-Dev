@@ -15,6 +15,8 @@ pub struct Config {
     pub hide_on_fullscreen: bool,
     #[serde(default = "d_monitor")]
     pub monitor_mode: String,
+    #[serde(default = "d_true")]
+    pub sounds_enabled: bool,
     #[serde(default)]
     pub launchers: Vec<Launcher>,
     #[serde(default)]
@@ -80,6 +82,8 @@ pub struct Project {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linked_path: Option<String>,
 }

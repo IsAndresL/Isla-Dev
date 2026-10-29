@@ -67,6 +67,7 @@ pub(crate) const G_LINK: &str = "\u{E71B}";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FilterMode {
     All,
+    Workspace(usize), // 0: Trabajo, 1: Personal, 2: Clientes, 3: Pruebas
     Pinned,
     GitDirty,
     RunningServer,
@@ -121,6 +122,7 @@ pub enum Hit {
     // Settings
     ToggleVisibility,
     ToggleFullscreenHide,
+    ToggleSounds,
     CycleMonitor,
     Startup,
     DefaultLauncher,
@@ -657,6 +659,16 @@ impl App {
             .filter(|(idx, p)| {
                 let mode_ok = match self.filter_mode {
                     FilterMode::All => true,
+                    FilterMode::Workspace(w_idx) => {
+                        let target = match w_idx {
+                            0 => "Trabajo",
+                            1 => "Personal",
+                            2 => "Clientes",
+                            3 => "Pruebas",
+                            _ => "",
+                        };
+                        p.workspace.as_deref() == Some(target)
+                    }
                     FilterMode::Pinned => p.pinned,
                     FilterMode::GitDirty => self
                         .git_states
@@ -686,10 +698,16 @@ impl App {
                     .as_deref()
                     .map(|n| n.to_lowercase())
                     .unwrap_or_default();
+                let ws = p
+                    .workspace
+                    .as_deref()
+                    .map(|w| w.to_lowercase())
+                    .unwrap_or_default();
                 p.name.to_lowercase().contains(&q)
                     || p.stack.to_lowercase().contains(&q)
                     || branch.contains(&q)
                     || note.contains(&q)
+                    || ws.contains(&q)
             })
             .map(|(i, _)| i)
             .collect()
@@ -835,10 +853,10 @@ impl App {
                 let n = filtered_len.clamp(3, MAX_ROWS) as f32;
                 let ports_bar = if self.active_ports.is_empty() { 0.0 } else { 32.0 };
                 let search_bar = 42.0;
-                let chips_bar = 30.0;
-                (796.0, 64.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
+                let chips_bar = 56.0;
+                (808.0, 64.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
-            View::Settings => (548.0, 64.0 + 9.0 * 48.0 + 38.0, 26.0),
+            View::Settings => (548.0, 64.0 + 10.0 * 48.0 + 38.0, 26.0),
             View::Wizard => {
                 let rows = match self.step {
                     Step::Name => self.cfg.templates.len().min(5) as f32 * 46.0 + 118.0,
@@ -848,7 +866,7 @@ impl App {
                 (548.0, 64.0 + rows + 68.0, 26.0)
             }
             View::GitModal => (548.0, 340.0, 26.0),
-            View::NoteModal => (520.0, 252.0, 26.0),
+            View::NoteModal => (560.0, 360.0, 26.0),
             View::CustomEditor => (548.0, 495.0, 26.0),
             View::Status => {
                 if self.skind == SKind::Creating || self.skind == SKind::Error {
@@ -925,6 +943,7 @@ impl App {
         self.hover = None;
         self.fade();
         if v == View::Expanded {
+            actions::play_ui_sound("pop", self.cfg.sounds_enabled);
             self.refresh_on_expand();
         }
         if matches!(
@@ -1429,6 +1448,7 @@ impl App {
                         last_opened: 0,
                         pinned: false,
                         note: None,
+                        workspace: None,
                         linked_path: None,
                     });
                     let i = self.cfg.projects.len() - 1;
@@ -1560,6 +1580,7 @@ impl App {
                 last_opened: config::now(),
                 pinned: false,
                 note: None,
+                workspace: None,
                 linked_path: None,
             });
             self.cfg.sort_projects();
@@ -1578,8 +1599,14 @@ impl App {
     pub(crate) fn save_project_note(&mut self) {
         if let Some(p) = self.cfg.projects.get_mut(self.note_proj_idx) {
             let clean = self.note_text.trim().to_string();
-            p.note = if clean.is_empty() { None } else { Some(clean) };
+            let is_empty = clean.is_empty();
+            p.note = if is_empty { None } else { Some(clean) };
             self.save();
+            if is_empty {
+                actions::play_ui_sound("delete", self.cfg.sounds_enabled);
+            } else {
+                actions::play_ui_sound("save", self.cfg.sounds_enabled);
+            }
         }
         self.set_view(View::Expanded);
     }
@@ -1696,6 +1723,7 @@ impl App {
                 self.kick();
             }
             Hit::FilterChip(mode) => {
+                actions::play_ui_sound("tab", self.cfg.sounds_enabled);
                 self.filter_mode = if self.filter_mode == mode {
                     FilterMode::All
                 } else {
@@ -1850,6 +1878,14 @@ impl App {
             }
             Hit::ToggleFullscreenHide => {
                 self.cfg.hide_on_fullscreen = !self.cfg.hide_on_fullscreen;
+                self.save();
+                self.kick();
+            }
+            Hit::ToggleSounds => {
+                self.cfg.sounds_enabled = !self.cfg.sounds_enabled;
+                if self.cfg.sounds_enabled {
+                    actions::play_ui_sound("click", true);
+                }
                 self.save();
                 self.kick();
             }
@@ -2102,6 +2138,42 @@ impl App {
                 210,
                 w!("📝 Editar nota / recordatorio rápido (Mini-TODO)"),
             );
+
+            if let Ok(ws_menu) = CreatePopupMenu() {
+                let cur_ws = p.workspace.as_deref().unwrap_or("");
+                let _ = AppendMenuW(
+                    ws_menu,
+                    if cur_ws == "Trabajo" { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    500,
+                    w!("💼 Trabajo"),
+                );
+                let _ = AppendMenuW(
+                    ws_menu,
+                    if cur_ws == "Personal" { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    501,
+                    w!("🚀 Personal"),
+                );
+                let _ = AppendMenuW(
+                    ws_menu,
+                    if cur_ws == "Clientes" { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    502,
+                    w!("👥 Clientes"),
+                );
+                let _ = AppendMenuW(
+                    ws_menu,
+                    if cur_ws == "Pruebas" { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    503,
+                    w!("🧪 Pruebas / Sandbox"),
+                );
+                let _ = AppendMenuW(ws_menu, MF_SEPARATOR, 0, None);
+                let _ = AppendMenuW(
+                    ws_menu,
+                    if cur_ws.is_empty() { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    504,
+                    w!("✖ Sin grupo"),
+                );
+                let _ = AppendMenuW(menu, MF_POPUP, ws_menu.0 as usize, w!("🗂️ Asignar a Grupo de Trabajo"));
+            }
             if p.linked_path.is_some() {
                 let _ = AppendMenuW(
                     menu,
@@ -2178,6 +2250,19 @@ impl App {
                 self.note_proj_idx = i;
                 self.note_text = p.note.clone().unwrap_or_default();
                 self.set_view(View::NoteModal);
+            } else if (500..=504).contains(&cmd) {
+                if let Some(proj) = self.cfg.projects.get_mut(i) {
+                    proj.workspace = match cmd {
+                        500 => Some("Trabajo".into()),
+                        501 => Some("Personal".into()),
+                        502 => Some("Clientes".into()),
+                        503 => Some("Pruebas".into()),
+                        _ => None,
+                    };
+                }
+                actions::play_ui_sound("tab", self.cfg.sounds_enabled);
+                self.save();
+                self.kick();
             } else if cmd == 211 {
                 if let Some(other) = actions::pick_folder(
                     self.hwnd,
@@ -2359,7 +2444,17 @@ impl App {
             x if x == VK_RETURN.0 as u32 => match self.view {
                 View::Wizard => self.wizard_next(),
                 View::GitModal => self.click(Hit::GitDoCommitPush),
-                View::NoteModal => self.save_project_note(),
+                View::NoteModal => {
+                    let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+                    if shift {
+                        if self.note_text.chars().count() < 1000 {
+                            self.note_text.push('\n');
+                            self.kick();
+                        }
+                    } else {
+                        self.save_project_note();
+                    }
+                }
                 View::CustomEditor => self.save_custom_editor_item(),
                 View::Expanded => {
                     let filtered = self.filtered_projects();
@@ -2393,6 +2488,15 @@ impl App {
                 }
             }
             0x4E if ctrl && self.view == View::Expanded => self.start_wizard(),
+            0x56 if ctrl && self.view == View::NoteModal => {
+                if let Some(txt) = actions::read_clipboard_text(self.hwnd) {
+                    let cur_len = self.note_text.chars().count();
+                    let rem = 1000usize.saturating_sub(cur_len);
+                    let clean: String = txt.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').take(rem).collect();
+                    self.note_text.push_str(&clean);
+                    self.kick();
+                }
+            }
             _ => return None,
         }
         Some(0)
@@ -2449,7 +2553,7 @@ impl App {
                 13 | 27 | 9 => return Some(0),
                 _ => {
                     let Some(ch) = char::from_u32(c) else { return Some(0) };
-                    if !ch.is_control() && self.note_text.chars().count() < 68 {
+                    if !ch.is_control() && self.note_text.chars().count() < 1000 {
                         self.note_text.push(ch);
                         self.kick();
                     }

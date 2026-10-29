@@ -265,20 +265,76 @@ impl App {
         self.hit(sb_x, cur_y, sb_w - 32.0, sb_h, Hit::SearchBox);
         cur_y += 40.0;
 
-        // 3. Fila de Filtros Rápidos por Chips + Botón 1-Click Git Clone desde Portapapeles
-        let mut chip_x = lx + 16.0;
+        // 3. Dos Filas de Filtros: Fila 1 (Workspaces / Grupos) + Fila 2 (Estados Técnicos)
         let chip_h = 22.0;
+
+        // Fila 1: Workspaces / Grupos de Trabajo (Trabajo · Personal · Clientes · Pruebas)
+        let mut row1_x = lx + 16.0;
+        let ws_trabajo = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Trabajo")).count();
+        let ws_personal = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Personal")).count();
+        let ws_clientes = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Clientes")).count();
+        let ws_pruebas = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Pruebas")).count();
+
+        let ws_chips: &[(FilterMode, String, u32)] = &[
+            (FilterMode::All, format!("Todos ({})", self.cfg.projects.len()), WHITE),
+            (FilterMode::Workspace(0), format!("💼 Trabajo ({ws_trabajo})"), CYAN),
+            (FilterMode::Workspace(1), format!("🚀 Personal ({ws_personal})"), GREEN),
+            (FilterMode::Workspace(2), format!("👥 Clientes ({ws_clientes})"), AMBER),
+            (FilterMode::Workspace(3), format!("🧪 Pruebas ({ws_pruebas})"), 0xA855F7),
+        ];
+
+        for (mode, label, accent_col) in ws_chips {
+            let active = self.filter_mode == *mode;
+            let hov = self.hov(Hit::FilterChip(*mode));
+            let cw = g.measure(label, &g.f.tiny) + 18.0;
+            g.rrect(
+                row1_x,
+                cur_y,
+                cw,
+                chip_h,
+                7.0,
+                if active { *accent_col } else { CARD },
+                if active { 0.18 } else if hov { 0.95 } else { 0.75 },
+            );
+            g.rrect_stroke(
+                row1_x + 0.5,
+                cur_y + 0.5,
+                cw - 1.0,
+                chip_h - 1.0,
+                7.0,
+                if active || hov { *accent_col } else { BORDER },
+                if active { 0.85 } else { 0.65 },
+                1.0,
+            );
+            let txt_col = if active { *accent_col } else if hov { WHITE } else { GRAY };
+            g.text(label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
+            self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(*mode));
+            row1_x += cw + 6.0;
+        }
+
+        // Botón 1-Click Git Clone desde Portapapeles (alineado a la derecha de la Fila 1)
+        if let Some((repo_name, _)) = &self.clipboard_repo {
+            let clone_lbl = format!("📥 Clonar {repo_name}");
+            let max_clone_w = (lx + tw - 16.0 - row1_x).max(0.0);
+            if max_clone_w >= 110.0 {
+                let cw = (g.measure(&clone_lbl, &g.f.tiny) + 18.0).min(max_clone_w);
+                let cx_btn = lx + tw - 16.0 - cw;
+                let hov = self.hov(Hit::CloneClipboardRepo);
+                g.rrect(cx_btn, cur_y, cw, chip_h, 7.0, GREEN, if hov { 0.25 } else { 0.14 });
+                g.rrect_stroke(cx_btn + 0.5, cur_y + 0.5, cw - 1.0, chip_h - 1.0, 7.0, GREEN, 0.65, 1.0);
+                g.text(&clone_lbl, &g.f.tiny_c, cx_btn + 4.0, cur_y, cw - 8.0, chip_h, GREEN, 1.0);
+                self.hit(cx_btn, cur_y, cw, chip_h, Hit::CloneClipboardRepo);
+            }
+        }
+        cur_y += 26.0;
+
+        // Fila 2: Filtros de Estado Técnico (Fijados · Git · Servidores · Full-Stack)
+        let mut row2_x = lx + 16.0;
         let dirty_total = self.git_states.values().filter(|g| g.dirty).count();
         let pinned_total = self.cfg.projects.iter().filter(|p| p.pinned).count();
         let fs_total = self.fullstack_map.values().filter(|f| f.is_fullstack()).count();
 
-        let chips: &[(FilterMode, String, u32, bool)] = &[
-            (
-                FilterMode::All,
-                format!("Todos ({})", self.cfg.projects.len()),
-                WHITE,
-                false,
-            ),
+        let status_chips: &[(FilterMode, String, u32, bool)] = &[
             (
                 FilterMode::Pinned,
                 format!("📌 Fijados ({pinned_total})"),
@@ -305,13 +361,13 @@ impl App {
             ),
         ];
 
-        for (mode, label, accent_col, has_git_icon) in chips {
+        for (mode, label, accent_col, has_git_icon) in status_chips {
             let active = self.filter_mode == *mode;
             let hov = self.hov(Hit::FilterChip(*mode));
             let extra_icon_w = if *has_git_icon { 15.0 } else { 0.0 };
             let cw = g.measure(label, &g.f.tiny) + 18.0 + extra_icon_w;
             g.rrect(
-                chip_x,
+                row2_x,
                 cur_y,
                 cw,
                 chip_h,
@@ -326,7 +382,7 @@ impl App {
                 },
             );
             g.rrect_stroke(
-                chip_x + 0.5,
+                row2_x + 0.5,
                 cur_y + 0.5,
                 cw - 1.0,
                 chip_h - 1.0,
@@ -343,11 +399,11 @@ impl App {
                 GRAY
             };
             if *has_git_icon {
-                g.draw_git_branch_icon(chip_x + 7.0, cur_y + 4.5, 13.0, txt_col, 0.95);
+                g.draw_git_branch_icon(row2_x + 7.0, cur_y + 4.5, 13.0, txt_col, 0.95);
                 g.text(
                     label,
                     &g.f.tiny,
-                    chip_x + 22.0,
+                    row2_x + 22.0,
                     cur_y,
                     cw - 26.0,
                     chip_h,
@@ -355,27 +411,12 @@ impl App {
                     1.0,
                 );
             } else {
-                g.text(label, &g.f.tiny_c, chip_x, cur_y, cw, chip_h, txt_col, 1.0);
+                g.text(label, &g.f.tiny_c, row2_x, cur_y, cw, chip_h, txt_col, 1.0);
             }
-            self.hit(chip_x, cur_y, cw, chip_h, Hit::FilterChip(*mode));
-            chip_x += cw + 6.0;
+            self.hit(row2_x, cur_y, cw, chip_h, Hit::FilterChip(*mode));
+            row2_x += cw + 6.0;
         }
-
-        // Si hay una URL de GitHub en el portapapeles, mostrar pill directo a la derecha de los filtros
-        if let Some((repo_name, _)) = &self.clipboard_repo {
-            let clone_lbl = format!("📥 Clonar {repo_name}");
-            let max_clone_w = (lx + tw - 16.0 - chip_x).max(0.0);
-            if max_clone_w >= 110.0 {
-                let cw = (g.measure(&clone_lbl, &g.f.tiny) + 18.0).min(max_clone_w);
-                let cx_btn = lx + tw - 16.0 - cw;
-                let hov = self.hov(Hit::CloneClipboardRepo);
-                g.rrect(cx_btn, cur_y, cw, chip_h, 7.0, GREEN, if hov { 0.25 } else { 0.14 });
-                g.rrect_stroke(cx_btn + 0.5, cur_y + 0.5, cw - 1.0, chip_h - 1.0, 7.0, GREEN, 0.65, 1.0);
-                g.text(&clone_lbl, &g.f.tiny_c, cx_btn + 4.0, cur_y, cw - 8.0, chip_h, GREEN, 1.0);
-                self.hit(cx_btn, cur_y, cw, chip_h, Hit::CloneClipboardRepo);
-            }
-        }
-        cur_y += 30.0;
+        cur_y += 28.0;
 
         // 4. Layout en dos columnas balanceadas:
         //    - Izquierda: Lista de Proyectos (con Micro-Badges, Hover-Reveal Linear style, Full-Stack combos y Scrollbar 3px)
@@ -740,9 +781,28 @@ impl App {
                 } else {
                     p.stack.as_str()
                 };
-                let st_w = g.measure(stack_label, &g.f.sub).min(max_text_w);
-                g.text(stack_label, &g.f.sub, text_x, sub_y, st_w + 4.0, 18.0, GRAY, 0.95);
+                let rel_act = actions::relative_time_string(p.last_opened, &p.path);
+                let meta_label = format!("{stack_label} · {rel_act}");
+                let st_w = g.measure(&meta_label, &g.f.sub).min(max_text_w);
+                g.text(&meta_label, &g.f.sub, text_x, sub_y, st_w + 4.0, 18.0, GRAY, 0.95);
                 let mut m_x = text_x + st_w + 8.0;
+
+                // Micro-badge de Grupo de Trabajo (Workspace)
+                if let Some(ws) = p.workspace.as_deref() {
+                    let (ws_icon, ws_col) = match ws {
+                        "Trabajo" => ("💼 Trabajo", CYAN),
+                        "Personal" => ("🚀 Personal", GREEN),
+                        "Clientes" => ("👥 Clientes", AMBER),
+                        "Pruebas" => ("🧪 Pruebas", 0xA855F7),
+                        _ => (ws, WHITE),
+                    };
+                    let wsw = (g.measure(ws_icon, &g.f.tiny) + 12.0).min(90.0);
+                    if m_x + wsw < rx {
+                        g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, ws_col, 0.12);
+                        g.text(ws_icon, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, ws_col, 0.95);
+                        m_x += wsw + 6.0;
+                    }
+                }
 
                 // Micro-badge de rama Git con icono vectorial real
                 if let Some(git) = git_info {
@@ -781,13 +841,28 @@ impl App {
                     m_x += fsw + 6.0;
                 }
 
-                // Micro-badge de Nota / Recordatorio Rápido (Mini-TODO)
+                // Micro-badge de Nota / Recordatorio Rápido (Mini-TODO) con clic directo
                 if let Some(note) = p.note.as_deref() {
                     if !note.is_empty() && m_x + 45.0 < rx {
                         let rem_w = (rx - m_x - 4.0).max(40.0);
-                        let note_lbl = format!("📝 {note}");
-                        let nw = (g.measure(&note_lbl, &g.f.tiny) + 12.0).min(rem_w);
-                        g.rrect(m_x, sub_y + 1.0, nw, 16.0, 5.0, AMBER, 0.13);
+                        let first_line = note.lines().next().unwrap_or(note);
+                        let note_lbl = if note.contains('\n') || first_line.len() < note.len() {
+                            format!("📝 {first_line}…")
+                        } else {
+                            format!("📝 {first_line}")
+                        };
+                        let nw = (g.measure(&note_lbl, &g.f.tiny) + 14.0).min(rem_w);
+                        let note_hov = self.hov(Hit::ProjNote(i));
+                        self.hit(m_x, sub_y + 1.0, nw, 16.0, Hit::ProjNote(i));
+                        g.rrect(
+                            m_x,
+                            sub_y + 1.0,
+                            nw,
+                            16.0,
+                            5.0,
+                            AMBER,
+                            if note_hov { 0.28 } else { 0.13 },
+                        );
                         g.text(&note_lbl, &g.f.tiny, m_x + 5.0, sub_y + 1.0, nw - 8.0, 16.0, AMBER, 0.95);
                     }
                 }
@@ -1280,10 +1355,15 @@ impl App {
             Hit::Back => Some("Volver atrás (Esc)".into()),
             Hit::ClearSearch => Some("Limpiar búsqueda".into()),
             Hit::FilterChip(FilterMode::All) => Some("Mostrar todos los proyectos".into()),
+            Hit::FilterChip(FilterMode::Workspace(0)) => Some("Filtrar proyectos del grupo 💼 Trabajo".into()),
+            Hit::FilterChip(FilterMode::Workspace(1)) => Some("Filtrar proyectos del grupo 🚀 Personal".into()),
+            Hit::FilterChip(FilterMode::Workspace(2)) => Some("Filtrar proyectos del grupo 👥 Clientes".into()),
+            Hit::FilterChip(FilterMode::Workspace(3)) => Some("Filtrar proyectos del grupo 🧪 Pruebas / Sandbox".into()),
             Hit::FilterChip(FilterMode::Pinned) => Some("Filtrar solo proyectos fijados".into()),
             Hit::FilterChip(FilterMode::GitDirty) => Some("Filtrar proyectos con cambios sin subir a Git".into()),
             Hit::FilterChip(FilterMode::RunningServer) => Some("Filtrar proyectos con servidor activo".into()),
             Hit::FilterChip(FilterMode::FullStack) => Some("Filtrar proyectos Full-Stack (Front + Back)".into()),
+            Hit::ToggleSounds => Some("Activar o silenciar micro-sonidos táctiles de Windows 11".into()),
             Hit::CloneClipboardRepo => Some("Clonar repositorio de GitHub copiado en el portapapeles".into()),
             Hit::QuickOpenBaseDir => Some("Abrir la carpeta raíz donde están tus proyectos".into()),
             Hit::QuickSyncProjects => Some("Sincronizar carpetas creadas o borradas en el disco".into()),

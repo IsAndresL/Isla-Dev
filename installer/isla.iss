@@ -25,6 +25,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\app.ico
 CloseApplications=no
 RestartApplications=no
+ChangesAssociations=yes
 
 [Languages]
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
@@ -40,10 +41,10 @@ Source: "..\logo\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requisitos.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"; IconIndex: 0
 Name: "{group}\Requisitos y Guía de Configuración"; Filename: "{app}\requisitos.txt"
 Name: "{group}\Desinstalar {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\app.ico"; IconIndex: 0; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "IslaDev"; ValueData: """{app}\{#AppExe}"""; Tasks: startup; Flags: uninsdeletevalue
@@ -57,6 +58,19 @@ Filename: "{app}\{#AppExe}"; Description: "Abrir {#AppName} ahora"; Flags: nowai
 Filename: "taskkill"; Parameters: "/F /IM {#AppExe}"; Flags: runhidden; RunOnceId: "KillIsla"
 
 [Code]
+procedure SHChangeNotify(wEventId: Integer; uFlags: Cardinal; dwItem1, dwItem2: Integer);
+external 'SHChangeNotify@shell32.dll stdcall';
+
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM isla-dev.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM isla-dev-portable.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(350);
+  Result := True;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -65,4 +79,12 @@ begin
   Exec('taskkill.exe', '/F /IM isla-dev-portable.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(250);
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    SHChangeNotify($08000000, 0, 0, 0); // SHCNE_ASSOCCHANGED: refresca la caché de iconos del explorador
+  end;
 end;
