@@ -2085,8 +2085,72 @@ pub fn focus_existing_project_window(
     None
 }
 
+/// Garantiza que la isla permanezca siempre por encima de la barra de tareas (`Shell_TrayWnd`) incluso cuando la barra
+/// de tareas está ubicada arriba (`y = 0`) y el usuario hace clic en ella o abre "Mostrar iconos ocultos".
+pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
+    unsafe {
+        if our_hwnd.0.is_null() || !IsWindowVisible(our_hwnd).as_bool() {
+            return;
+        }
+        // Si no hay ninguna ventana por encima de la isla en el Z-Order, salir en O(1) sin usar CPU.
+        let prev = GetWindow(our_hwnd, GW_HWNDPREV).unwrap_or_default();
+        if prev.0.is_null() {
+            return;
+        }
+
+        let cur_tid = GetCurrentThreadId();
+        let fg = GetForegroundWindow();
+        let fg_tid = if !fg.0.is_null() {
+            GetWindowThreadProcessId(fg, None)
+        } else {
+            0
+        };
+        let tray = FindWindowW(w!("Shell_TrayWnd"), None).unwrap_or_default();
+        let tray_tid = if !tray.0.is_null() {
+            GetWindowThreadProcessId(tray, None)
+        } else {
+            0
+        };
+
+        if fg_tid != 0 && fg_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, fg_tid, true);
+        }
+        if tray_tid != 0 && tray_tid != cur_tid && tray_tid != fg_tid {
+            let _ = AttachThreadInput(cur_tid, tray_tid, true);
+        }
+
+        let _ = SetWindowPos(
+            our_hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING,
+        );
+        if !tray.0.is_null() {
+            let _ = SetWindowPos(
+                tray,
+                our_hwnd,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+            );
+        }
+
+        if tray_tid != 0 && tray_tid != cur_tid && tray_tid != fg_tid {
+            let _ = AttachThreadInput(cur_tid, tray_tid, false);
+        }
+        if fg_tid != 0 && fg_tid != cur_tid {
+            let _ = AttachThreadInput(cur_tid, fg_tid, false);
+        }
+    }
+}
+
 /// Detecta si otra aplicación (juego o video) está en pantalla completa exclusiva/borderless sobre el monitor de la isla,
-/// ignorando siempre la barra de tareas, bandeja del sistema ("Mostrar iconos ocultos"), menú Inicio y ventanas de Explorer.
+/// ignorando siempre la barra de tareas, bandeja del sistema ("Mostrar iconos ocultos"), menú Inicio y cualquier proceso de Windows.
 pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
     unsafe {
         let fg = GetForegroundWindow();
@@ -2119,6 +2183,8 @@ pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
             || clow.contains("notifyicon")
             || clow.contains("corewindow")
             || clow.contains("tooltip")
+            || clow.contains("popup")
+            || clow.contains("flyout")
         {
             return false;
         }
@@ -2127,29 +2193,32 @@ pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
         if (ex_style & WS_EX_TOOLWINDOW.0) != 0
             || (ex_style & WS_EX_NOACTIVATE.0) != 0
             || (ex_style & WS_EX_TRANSPARENT.0) != 0
+            || (ex_style & WS_EX_LAYERED.0) != 0
         {
             return false;
         }
 
-        // Nunca ocultar por procesos del propio Shell de Windows (explorer.exe, barra de tareas, bandeja, menú inicio)
+        // Nunca ocultar por procesos del sistema Windows (C:\Windows\*, explorer.exe, barra de tareas, bandeja, menú inicio)
         let mut pid = 0u32;
         GetWindowThreadProcessId(fg, Some(&mut pid));
-        if let Some(exe) = get_process_exe_path(pid) {
-            let elow = exe.to_lowercase();
-            if elow.ends_with("\\explorer.exe")
-                || elow.ends_with("\\shellexperiencehost.exe")
-                || elow.ends_with("\\startmenuexperiencehost.exe")
-                || elow.ends_with("\\searchhost.exe")
-                || elow.ends_with("\\textinputhost.exe")
-                || elow.ends_with("\\applicationframehost.exe")
-                || elow.ends_with("\\widgets.exe")
-                || elow.ends_with("\\lockapp.exe")
-                || elow.ends_with("\\systemsettings.exe")
-                || elow.contains("isla-dev")
-                || elow.contains("isladev")
-            {
-                return false;
-            }
+        let Some(exe) = get_process_exe_path(pid) else {
+            return false;
+        };
+        let elow = exe.to_lowercase();
+        if elow.starts_with("c:\\windows\\")
+            || elow.ends_with("\\explorer.exe")
+            || elow.ends_with("\\shellexperiencehost.exe")
+            || elow.ends_with("\\startmenuexperiencehost.exe")
+            || elow.ends_with("\\searchhost.exe")
+            || elow.ends_with("\\textinputhost.exe")
+            || elow.ends_with("\\applicationframehost.exe")
+            || elow.ends_with("\\widgets.exe")
+            || elow.ends_with("\\lockapp.exe")
+            || elow.ends_with("\\systemsettings.exe")
+            || elow.contains("isla-dev")
+            || elow.contains("isladev")
+        {
+            return false;
         }
 
         let mut rc = RECT::default();

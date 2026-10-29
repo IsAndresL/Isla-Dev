@@ -22,6 +22,7 @@ pub const WM_TRAY: u32 = WM_APP + 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_ANIM: usize = 1;
 const TIMER_POLL: usize = 2;
+const TIMER_TOPMOST: usize = 3;
 const HOTKEY_ID: i32 = 1;
 pub(crate) const MAX_ROWS: usize = 6;
 
@@ -420,6 +421,7 @@ impl App {
         unsafe {
             DragAcceptFiles(self.hwnd, true);
             SetTimer(self.hwnd, TIMER_POLL, 3500, None);
+            SetTimer(self.hwnd, TIMER_TOPMOST, 45, None);
         }
         self.kick();
     }
@@ -516,17 +518,7 @@ impl App {
 
         // Mantener la isla siempre visible por encima de la barra de tareas y bandeja del sistema
         if self.visible && !self.auto_hidden_fs {
-            unsafe {
-                let _ = SetWindowPos(
-                    self.hwnd,
-                    HWND_TOPMOST,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
-            }
+            actions::ensure_island_above_taskbar(self.hwnd);
         }
 
         // 2. Si el panel está abierto o en hover, sincronizar carpetas borradas y ventanas abiertas
@@ -756,6 +748,7 @@ impl App {
         }
         unsafe {
             let _ = KillTimer(self.hwnd, TIMER_POLL);
+            let _ = KillTimer(self.hwnd, TIMER_TOPMOST);
             let _ = Shell_NotifyIconW(NIM_DELETE, &self.tray_data());
             let _ = UnregisterHotKey(self.hwnd, HOTKEY_ID);
             PostQuitMessage(0);
@@ -2516,6 +2509,10 @@ impl App {
                         self.tick();
                     } else if wp.0 == TIMER_POLL {
                         self.poll_periodic();
+                    } else if wp.0 == TIMER_TOPMOST {
+                        if self.visible && !self.auto_hidden_fs {
+                            actions::ensure_island_above_taskbar(self.hwnd);
+                        }
                     }
                     Some(0)
                 }
@@ -2669,11 +2666,9 @@ impl App {
                             self.set_view(View::Compact);
                         }
                     }
-                    let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
                     if self.visible && !self.auto_hidden_fs {
-                        flags |= SWP_SHOWWINDOW;
+                        actions::ensure_island_above_taskbar(self.hwnd);
                     }
-                    let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
                     None
                 }
                 WM_WINDOWPOSCHANGING => {
