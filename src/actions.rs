@@ -2092,31 +2092,24 @@ pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
         if our_hwnd.0.is_null() || !IsWindowVisible(our_hwnd).as_bool() {
             return;
         }
-        // Si no hay ninguna ventana por encima de la isla en el Z-Order, salir en O(1) sin usar CPU.
-        let prev = GetWindow(our_hwnd, GW_HWNDPREV).unwrap_or_default();
-        if prev.0.is_null() {
+        let tray = FindWindowW(w!("Shell_TrayWnd"), None).unwrap_or_default();
+        if tray.0.is_null() {
             return;
         }
 
-        let cur_tid = GetCurrentThreadId();
-        let fg = GetForegroundWindow();
-        let fg_tid = if !fg.0.is_null() {
-            GetWindowThreadProcessId(fg, None)
-        } else {
-            0
-        };
-        let tray = FindWindowW(w!("Shell_TrayWnd"), None).unwrap_or_default();
-        let tray_tid = if !tray.0.is_null() {
-            GetWindowThreadProcessId(tray, None)
-        } else {
-            0
-        };
-
-        if fg_tid != 0 && fg_tid != cur_tid {
-            let _ = AttachThreadInput(cur_tid, fg_tid, true);
+        let mut cur = GetWindow(our_hwnd, GW_HWNDPREV).unwrap_or_default();
+        let mut tray_is_above = false;
+        let mut steps = 0;
+        while !cur.0.is_null() && steps < 48 {
+            if cur == tray {
+                tray_is_above = true;
+                break;
+            }
+            cur = GetWindow(cur, GW_HWNDPREV).unwrap_or_default();
+            steps += 1;
         }
-        if tray_tid != 0 && tray_tid != cur_tid && tray_tid != fg_tid {
-            let _ = AttachThreadInput(cur_tid, tray_tid, true);
+        if !tray_is_above {
+            return;
         }
 
         let _ = SetWindowPos(
@@ -2128,24 +2121,15 @@ pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING,
         );
-        if !tray.0.is_null() {
-            let _ = SetWindowPos(
-                tray,
-                our_hwnd,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
-            );
-        }
-
-        if tray_tid != 0 && tray_tid != cur_tid && tray_tid != fg_tid {
-            let _ = AttachThreadInput(cur_tid, tray_tid, false);
-        }
-        if fg_tid != 0 && fg_tid != cur_tid {
-            let _ = AttachThreadInput(cur_tid, fg_tid, false);
-        }
+        let _ = SetWindowPos(
+            tray,
+            our_hwnd,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+        );
     }
 }
 

@@ -261,7 +261,7 @@ pub struct App {
     pub(crate) servers: HashMap<String, RunningServer>,
     pub(crate) active_ports: Vec<u16>,
     pub(crate) open_windows: Vec<OpenProjectWindow>,
-    pub(crate) open_scroll: usize,
+    pub(crate) swallow_lbuttonup: bool,
     // asistente de creación
     pub(crate) step: Step,
     pub(crate) wiz_name: String,
@@ -365,7 +365,7 @@ impl App {
             servers: HashMap::new(),
             active_ports: Vec::new(),
             open_windows: Vec::new(),
-            open_scroll: 0,
+            swallow_lbuttonup: false,
             step: Step::Name,
             wiz_name: String::new(),
             wiz_tpl: 0,
@@ -420,8 +420,8 @@ impl App {
         self.set_visible(true);
         unsafe {
             DragAcceptFiles(self.hwnd, true);
-            SetTimer(self.hwnd, TIMER_POLL, 3500, None);
-            SetTimer(self.hwnd, TIMER_TOPMOST, 45, None);
+            SetTimer(self.hwnd, TIMER_POLL, 4500, None);
+            SetTimer(self.hwnd, TIMER_TOPMOST, 180, None);
         }
         self.kick();
     }
@@ -436,15 +436,18 @@ impl App {
             self.cfg.projects.iter().map(|p| p.path.to_lowercase()).collect();
         self.git_states
             .retain(|k, _| valid_paths.contains(&k.to_lowercase()));
-        self.fullstack_map.clear();
+        self.fullstack_map
+            .retain(|k, _| valid_paths.contains(&k.to_lowercase()));
 
         for p in &self.cfg.projects {
-            let fs_info = actions::detect_project_targets(
-                Path::new(&p.path),
-                &p.stack,
-                p.linked_path.as_deref(),
-            );
-            self.fullstack_map.insert(p.path.clone(), fs_info);
+            if !self.fullstack_map.contains_key(&p.path) {
+                let fs_info = actions::detect_project_targets(
+                    Path::new(&p.path),
+                    &p.stack,
+                    p.linked_path.as_deref(),
+                );
+                self.fullstack_map.insert(p.path.clone(), fs_info);
+            }
 
             if !self.git_states.contains_key(&p.path) {
                 if let Some(branch) = actions::read_git_branch_fast(Path::new(&p.path)) {
@@ -463,7 +466,15 @@ impl App {
         }
     }
 
+    /// Actualización ligera e instantánea al desplegar el panel (sin crear subprocesos `git.exe` que muestren cursor de carga).
+    pub(crate) fn refresh_on_expand(&mut self) {
+        self.scan_and_sync();
+        self.clipboard_repo = actions::read_clipboard_github_repo(self.hwnd);
+        self.open_windows = actions::scan_open_project_windows_sync(&self.cfg.projects, self.hwnd);
+    }
+
     pub(crate) fn refresh_live_state(&mut self) {
+        self.fullstack_map.clear();
         self.scan_and_sync();
         self.clipboard_repo = actions::read_clipboard_github_repo(self.hwnd);
         let paths: Vec<String> = self.cfg.projects.iter().map(|p| p.path.clone()).collect();
@@ -521,8 +532,8 @@ impl App {
             actions::ensure_island_above_taskbar(self.hwnd);
         }
 
-        // 2. Si el panel está abierto o en hover, sincronizar carpetas borradas y ventanas abiertas
-        if self.view == View::Expanded || (self.view == View::Compact && self.hov(Hit::Pill)) {
+        // 2. Solo si el panel está abierto, sincronizar carpetas borradas y ventanas abiertas
+        if self.view == View::Expanded {
             let scanned = actions::scan_base_dir(Path::new(&self.cfg.base_dir));
             if self.cfg.sync_scanned_projects(scanned) {
                 self.save();
@@ -914,7 +925,7 @@ impl App {
         self.hover = None;
         self.fade();
         if v == View::Expanded {
-            self.refresh_live_state();
+            self.refresh_on_expand();
         }
         if matches!(
             v,
@@ -2568,7 +2579,21 @@ impl App {
                     }
                     Some(0)
                 }
+                WM_LBUTTONDOWN => {
+                    if self.view == View::Compact {
+                        let (x, y) = self.mpos(lp);
+                        if self.hit_at(x, y) == Some(Hit::Pill) {
+                            self.swallow_lbuttonup = true;
+                            self.click(Hit::Pill);
+                        }
+                    }
+                    Some(0)
+                }
                 WM_LBUTTONUP => {
+                    if self.swallow_lbuttonup {
+                        self.swallow_lbuttonup = false;
+                        return Some(0);
+                    }
                     let (x, y) = self.mpos(lp);
                     if let Some(h) = self.hit_at(x, y) {
                         self.click(h);
@@ -2639,11 +2664,9 @@ impl App {
                     Some(0)
                 }
                 WM_SETCURSOR => {
-                    if self.hover.is_some() {
-                        let _ = SetCursor(LoadCursorW(None, IDC_HAND).unwrap_or_default());
-                        return Some(1);
-                    }
-                    None
+                    let cur = if self.hover.is_some() { IDC_HAND } else { IDC_ARROW };
+                    let _ = SetCursor(LoadCursorW(None, cur).unwrap_or_default());
+                    Some(1)
                 }
                 WM_KEYDOWN => self.key(wp.0 as u32),
                 WM_CHAR => self.chr(wp.0 as u32),

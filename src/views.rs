@@ -103,8 +103,14 @@ impl App {
             }
         }
 
+        // Superficie con alpha mínimo (1/255, invisible al ojo) para que Windows (UpdateLayeredWindow)
+        // capture siempre el primer clic/hover en toda la zona de la gota sin dejar pasar el clic al fondo.
         let hit_w = w.max(96.0);
-        let hit_h = h.max(26.0);
+        let hit_h = h.max(24.0);
+        let prev_a = g.alpha.get();
+        g.alpha.set(1.0);
+        g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, BODY, 0.006);
+        g.alpha.set(prev_a);
         self.hit(cx - hit_w / 2.0, 0.0, hit_w, hit_h, Hit::Pill);
     }
 
