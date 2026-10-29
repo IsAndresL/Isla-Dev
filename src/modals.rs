@@ -2,6 +2,10 @@ use crate::actions;
 use crate::app::*;
 use crate::config::{APP_AUTHOR, APP_VERSION};
 
+pub const WS_ICONS: &[&str] = &[
+    "💼", "🚀", "👥", "🧪", "📁", "⚡", "💻", "🛠️", "🎯", "🔥", "📦", "🌐", "🤖", "🎨", "🎮", "🔒",
+];
+
 impl App {
     pub(crate) fn draw_settings(&self, lx: f32, y: f32, tw: f32) {
         let g = &self.gfx;
@@ -490,106 +494,146 @@ impl App {
             lx,
             y,
             tw,
-            &format!("Bloc de Notas · {}", p.name),
-            "Notas, tareas pendientes, ideas y recordatorios del proyecto",
+            &format!("{} · Nota", p.name),
+            "",
             true,
         );
 
-        let mut ry = y + 64.0;
+        let mut ry = y + 58.0;
         let bx = lx + 16.0;
         let bw = tw - 32.0;
-        let box_h = 180.0;
+        let box_h = 160.0;
 
-        // Caja de texto amplia estilo tarjeta / textarea
+        // Caja de texto amplia estilo tarjeta / textarea limpia
         g.rrect(bx, ry, bw, box_h, 10.0, 0x0C1017, 0.95);
         g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, box_h - 1.0, 10.0, ACCENT, 0.45, 1.0);
         self.hit(bx, ry, bw, box_h, Hit::NoteInput);
 
         let cur_count = self.note_text.chars().count();
-        if self.note_text.is_empty() {
-            g.text(
-                "Escribe notas, tareas pendientes, credenciales de prueba o recordatorios para este proyecto…\n\n• Shift+Enter para salto de línea\n• Ctrl+V para pegar\n• Enter para guardar",
-                &g.f.sub,
-                bx + 14.0,
-                ry + 14.0,
-                bw - 28.0,
-                box_h - 44.0,
-                DIM,
-                0.8,
-            );
-        } else {
-            // Visualización multilínea con cursor parpadeante
-            let blink = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0) / 530) % 2 == 0;
-            let display_text = if blink {
-                format!("{}|", self.note_text)
-            } else {
-                self.note_text.clone()
-            };
-            g.text(
-                &display_text,
-                &g.f.body,
-                bx + 14.0,
-                ry + 12.0,
-                bw - 28.0,
-                box_h - 38.0,
-                WHITE,
-                0.95,
-            );
-        }
+        let blink = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0) / 530) % 2 == 0;
 
-        // Barra inferior interna con contador de caracteres y atajos
-        let count_str = format!("{cur_count}/1000 caracteres · Shift+Enter = salto · Enter = guardar");
+        let display_text = if blink {
+            format!("{}|", self.note_text)
+        } else {
+            self.note_text.clone()
+        };
+        g.text(
+            &display_text,
+            &g.f.body,
+            bx + 14.0,
+            ry + 12.0,
+            bw - 28.0,
+            box_h - 34.0,
+            WHITE,
+            0.95,
+        );
+
+        // Contador minimalista en la esquina inferior derecha
+        let count_str = format!("{cur_count} / 1000");
         g.text(
             &count_str,
             &g.f.tiny,
-            bx + 14.0,
+            bx + bw - 74.0,
             ry + box_h - 22.0,
-            bw - 28.0,
+            64.0,
             16.0,
             if cur_count > 900 { AMBER } else { GRAY },
-            0.85,
+            0.6,
         );
-        ry += box_h + 16.0;
+        ry += box_h + 14.0;
 
-        // Botones de acción: Guardar, Eliminar y Cancelar
-        let save_w = 210.0;
-        let del_w = 140.0;
-        let cancel_w = 110.0;
-        let spacing = 12.0;
+        // Botones minimalistas: Guardar (✓), Papelera (G_TRASH monocromático) y Cerrar (✕)
+        let btn_sz = 36.0;
+        let mut ax = bx + bw - btn_sz;
 
-        self.pill_action_btn(
-            bx,
-            ry,
-            save_w,
-            42.0,
-            "✓ Guardar nota (Enter)",
-            GREEN,
-            true,
-            Hit::NoteSave,
-        );
-        self.pill_action_btn(
-            bx + save_w + spacing,
-            ry,
-            del_w,
-            42.0,
-            "🗑 Eliminar nota",
-            RED,
-            false,
-            Hit::NoteClear,
-        );
-        self.pill_action_btn(
-            bx + save_w + del_w + spacing * 2.0,
-            ry,
-            cancel_w,
-            42.0,
-            "✕ Cancelar",
-            GRAY,
-            false,
-            Hit::Back,
-        );
+        // Guardar
+        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, GREEN, true, Hit::NoteSave);
+        ax -= btn_sz + 10.0;
+
+        // Papelera monocromática
+        let trash_hov = self.hov(Hit::NoteClear);
+        self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { RED } else { GRAY }, false, Hit::NoteClear);
+        ax -= btn_sz + 10.0;
+
+        // Cancelar / Cerrar
+        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, GRAY, false, Hit::Back);
+    }
+
+    pub(crate) fn draw_workspace_modal(&self, lx: f32, y: f32, tw: f32) {
+        let g = &self.gfx;
+        let is_edit = self.ws_edit_idx.is_some();
+        let title = if is_edit { "Editar Grupo de Trabajo" } else { "Nuevo Grupo de Trabajo" };
+        self.header(lx, y, tw, title, "", true);
+
+        let mut ry = y + 58.0;
+        let bx = lx + 20.0;
+        let bw = tw - 40.0;
+
+        // Campo de Nombre
+        g.text("Nombre del grupo:", &g.f.sub, bx, ry, bw, 18.0, GRAY, 1.0);
+        ry += 22.0;
+        self.draw_input_box(bx, ry, bw, 36.0, "Ej. Trabajo, Clientes, Estudio…", &self.ws_name, true, Hit::WsNameInput);
+        ry += 48.0;
+
+        // Selector de Icono / Emoji
+        g.text("Icono del grupo:", &g.f.sub, bx, ry, bw, 18.0, GRAY, 1.0);
+        ry += 24.0;
+
+        let icon_sz = 34.0;
+        let spacing = 8.0;
+        let mut ix = bx;
+        for (k, &ico) in WS_ICONS.iter().enumerate() {
+            let is_sel = self.ws_icon == ico;
+            let hov = self.hov(Hit::WsIconPick(k));
+            g.rrect(
+                ix,
+                ry,
+                icon_sz,
+                icon_sz,
+                8.0,
+                if is_sel { ACCENT } else { CARD },
+                if is_sel { 0.28 } else if hov { 0.9 } else { 0.5 },
+            );
+            g.rrect_stroke(
+                ix + 0.5,
+                ry + 0.5,
+                icon_sz - 1.0,
+                icon_sz - 1.0,
+                8.0,
+                if is_sel { ACCENT } else { BORDER },
+                if is_sel { 0.9 } else { 0.6 },
+                1.0,
+            );
+            g.text(ico, &g.f.body, ix, ry + 2.0, icon_sz, icon_sz - 4.0, WHITE, 1.0);
+            self.hit(ix, ry, icon_sz, icon_sz, Hit::WsIconPick(k));
+            ix += icon_sz + spacing;
+            if (k + 1) % 8 == 0 {
+                ix = bx;
+                ry += icon_sz + spacing;
+            }
+        }
+        ry += 18.0;
+
+        // Botones minimalistas
+        let btn_sz = 36.0;
+        let mut ax = bx + bw - btn_sz;
+
+        // Guardar
+        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, GREEN, true, Hit::WsSave);
+        ax -= btn_sz + 10.0;
+
+        // Eliminar (solo si es edición)
+        if let Some(idx) = self.ws_edit_idx {
+            let trash_hov = self.hov(Hit::WsDelete(idx));
+            self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { RED } else { GRAY }, false, Hit::WsDelete(idx));
+            ax -= btn_sz + 10.0;
+        }
+
+        // Cancelar
+        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, GRAY, false, Hit::Back);
     }
 
     pub(crate) fn draw_custom_editor(&self, lx: f32, y: f32, tw: f32) {

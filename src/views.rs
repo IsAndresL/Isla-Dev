@@ -77,6 +77,7 @@ impl App {
             View::Wizard => self.draw_wizard(lx, y, tw),
             View::GitModal => self.draw_git_modal(lx, y, tw),
             View::NoteModal => self.draw_note_modal(lx, y, tw),
+            View::WorkspaceModal => self.draw_workspace_modal(lx, y, tw),
             View::CustomEditor => self.draw_custom_editor(lx, y, tw),
             View::Status => self.draw_status(lx, y, tw, th),
         }
@@ -268,32 +269,22 @@ impl App {
         // 3. Dos Filas de Filtros: Fila 1 (Workspaces / Grupos) + Fila 2 (Estados Técnicos)
         let chip_h = 22.0;
 
-        // Fila 1: Workspaces / Grupos de Trabajo (Trabajo · Personal · Clientes · Pruebas)
+        // Fila 1: Workspaces / Grupos de Trabajo dinámicos
         let mut row1_x = lx + 16.0;
-        let ws_trabajo = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Trabajo")).count();
-        let ws_personal = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Personal")).count();
-        let ws_clientes = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Clientes")).count();
-        let ws_pruebas = self.cfg.projects.iter().filter(|p| p.workspace.as_deref() == Some("Pruebas")).count();
 
-        let ws_chips: &[(FilterMode, String, u32)] = &[
-            (FilterMode::All, format!("Todos ({})", self.cfg.projects.len()), WHITE),
-            (FilterMode::Workspace(0), format!("💼 Trabajo ({ws_trabajo})"), CYAN),
-            (FilterMode::Workspace(1), format!("🚀 Personal ({ws_personal})"), GREEN),
-            (FilterMode::Workspace(2), format!("👥 Clientes ({ws_clientes})"), AMBER),
-            (FilterMode::Workspace(3), format!("🧪 Pruebas ({ws_pruebas})"), 0xA855F7),
-        ];
-
-        for (mode, label, accent_col) in ws_chips {
-            let active = self.filter_mode == *mode;
-            let hov = self.hov(Hit::FilterChip(*mode));
-            let cw = g.measure(label, &g.f.tiny) + 18.0;
+        // Chip "Todos"
+        {
+            let label = format!("Todos ({})", self.cfg.projects.len());
+            let active = self.filter_mode == FilterMode::All;
+            let hov = self.hov(Hit::FilterChip(FilterMode::All));
+            let cw = g.measure(&label, &g.f.tiny) + 18.0;
             g.rrect(
                 row1_x,
                 cur_y,
                 cw,
                 chip_h,
                 7.0,
-                if active { *accent_col } else { CARD },
+                if active { WHITE } else { CARD },
                 if active { 0.18 } else if hov { 0.95 } else { 0.75 },
             );
             g.rrect_stroke(
@@ -302,15 +293,75 @@ impl App {
                 cw - 1.0,
                 chip_h - 1.0,
                 7.0,
-                if active || hov { *accent_col } else { BORDER },
+                if active || hov { WHITE } else { BORDER },
                 if active { 0.85 } else { 0.65 },
                 1.0,
             );
-            let txt_col = if active { *accent_col } else if hov { WHITE } else { GRAY };
-            g.text(label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
-            self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(*mode));
+            let txt_col = if active || hov { WHITE } else { GRAY };
+            g.text(&label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
+            self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(FilterMode::All));
             row1_x += cw + 6.0;
         }
+
+        // Chips para cada Workspace dinámico
+        for (k, w) in self.cfg.workspaces.iter().enumerate() {
+            let count = self.cfg.projects.iter().filter(|p| {
+                p.workspace.as_deref().map(|ws| ws.eq_ignore_ascii_case(&w.name) || ws.eq_ignore_ascii_case(&w.id)).unwrap_or(false)
+            }).count();
+            let label = format!("{} {} ({count})", w.icon, w.name);
+            let active = self.filter_mode == FilterMode::Workspace(k);
+            let hov = self.hov(Hit::FilterChip(FilterMode::Workspace(k)));
+            let cw = g.measure(&label, &g.f.tiny) + 18.0;
+            g.rrect(
+                row1_x,
+                cur_y,
+                cw,
+                chip_h,
+                7.0,
+                if active { ACCENT } else { CARD },
+                if active { 0.18 } else if hov { 0.95 } else { 0.75 },
+            );
+            g.rrect_stroke(
+                row1_x + 0.5,
+                cur_y + 0.5,
+                cw - 1.0,
+                chip_h - 1.0,
+                7.0,
+                if active || hov { ACCENT } else { BORDER },
+                if active { 0.85 } else { 0.65 },
+                1.0,
+            );
+            let txt_col = if active { ACCENT } else if hov { WHITE } else { GRAY };
+            g.text(&label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
+            self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(FilterMode::Workspace(k)));
+            row1_x += cw + 6.0;
+        }
+
+        // Botón "+" minimalista para agregar o editar grupos de trabajo
+        let add_btn_w = 24.0;
+        let add_hov = self.hov(Hit::AddWorkspace);
+        g.rrect(
+            row1_x,
+            cur_y,
+            add_btn_w,
+            chip_h,
+            7.0,
+            CARD,
+            if add_hov { 0.95 } else { 0.6 },
+        );
+        g.rrect_stroke(
+            row1_x + 0.5,
+            cur_y + 0.5,
+            add_btn_w - 1.0,
+            chip_h - 1.0,
+            7.0,
+            if add_hov { WHITE } else { BORDER },
+            if add_hov { 0.8 } else { 0.5 },
+            1.0,
+        );
+        g.text(G_ADD, &g.f.icon, row1_x, cur_y - 1.0, add_btn_w, chip_h, if add_hov { WHITE } else { GRAY }, 1.0);
+        self.hit(row1_x, cur_y, add_btn_w, chip_h, Hit::AddWorkspace);
+        row1_x += add_btn_w + 6.0;
 
         // Botón 1-Click Git Clone desde Portapapeles (alineado a la derecha de la Fila 1)
         if let Some((repo_name, _)) = &self.clipboard_repo {
@@ -789,17 +840,16 @@ impl App {
 
                 // Micro-badge de Grupo de Trabajo (Workspace)
                 if let Some(ws) = p.workspace.as_deref() {
-                    let (ws_icon, ws_col) = match ws {
-                        "Trabajo" => ("💼 Trabajo", CYAN),
-                        "Personal" => ("🚀 Personal", GREEN),
-                        "Clientes" => ("👥 Clientes", AMBER),
-                        "Pruebas" => ("🧪 Pruebas", 0xA855F7),
-                        _ => (ws, WHITE),
+                    let ws_item = self.cfg.workspaces.iter().find(|w| w.name.eq_ignore_ascii_case(ws) || w.id.eq_ignore_ascii_case(ws));
+                    let ws_lbl = if let Some(w) = ws_item {
+                        format!("{} {}", w.icon, w.name)
+                    } else {
+                        ws.to_string()
                     };
-                    let wsw = (g.measure(ws_icon, &g.f.tiny) + 12.0).min(90.0);
+                    let wsw = (g.measure(&ws_lbl, &g.f.tiny) + 12.0).min(110.0);
                     if m_x + wsw < rx {
-                        g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, ws_col, 0.12);
-                        g.text(ws_icon, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, ws_col, 0.95);
+                        g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
+                        g.text(&ws_lbl, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, WHITE, 0.9);
                         m_x += wsw + 6.0;
                     }
                 }
@@ -1355,15 +1405,28 @@ impl App {
             Hit::Back => Some("Volver atrás (Esc)".into()),
             Hit::ClearSearch => Some("Limpiar búsqueda".into()),
             Hit::FilterChip(FilterMode::All) => Some("Mostrar todos los proyectos".into()),
-            Hit::FilterChip(FilterMode::Workspace(0)) => Some("Filtrar proyectos del grupo 💼 Trabajo".into()),
-            Hit::FilterChip(FilterMode::Workspace(1)) => Some("Filtrar proyectos del grupo 🚀 Personal".into()),
-            Hit::FilterChip(FilterMode::Workspace(2)) => Some("Filtrar proyectos del grupo 👥 Clientes".into()),
-            Hit::FilterChip(FilterMode::Workspace(3)) => Some("Filtrar proyectos del grupo 🧪 Pruebas / Sandbox".into()),
+            Hit::FilterChip(FilterMode::Workspace(k)) => {
+                if let Some(w) = self.cfg.workspaces.get(k) {
+                    Some(format!("Filtrar proyectos del grupo {} {}", w.icon, w.name))
+                } else {
+                    Some("Filtrar por grupo de trabajo".into())
+                }
+            }
+            Hit::AddWorkspace => Some("Crear nuevo grupo de trabajo (+)".into()),
+            Hit::EditWorkspace(k) => {
+                if let Some(w) = self.cfg.workspaces.get(k) {
+                    Some(format!("Editar grupo {} {}", w.icon, w.name))
+                } else {
+                    Some("Editar grupo de trabajo".into())
+                }
+            }
             Hit::FilterChip(FilterMode::Pinned) => Some("Filtrar solo proyectos fijados".into()),
             Hit::FilterChip(FilterMode::GitDirty) => Some("Filtrar proyectos con cambios sin subir a Git".into()),
             Hit::FilterChip(FilterMode::RunningServer) => Some("Filtrar proyectos con servidor activo".into()),
             Hit::FilterChip(FilterMode::FullStack) => Some("Filtrar proyectos Full-Stack (Front + Back)".into()),
             Hit::ToggleSounds => Some("Activar o silenciar micro-sonidos táctiles de Windows 11".into()),
+            Hit::NoteSave => Some("Guardar nota (Enter)".into()),
+            Hit::NoteClear => Some("Eliminar nota".into()),
             Hit::CloneClipboardRepo => Some("Clonar repositorio de GitHub copiado en el portapapeles".into()),
             Hit::QuickOpenBaseDir => Some("Abrir la carpeta raíz donde están tus proyectos".into()),
             Hit::QuickSyncProjects => Some("Sincronizar carpetas creadas o borradas en el disco".into()),

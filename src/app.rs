@@ -142,6 +142,13 @@ pub enum Hit {
     NoteInput,
     NoteSave,
     NoteClear,
+    // Workspace Management
+    AddWorkspace,
+    EditWorkspace(usize),
+    WsNameInput,
+    WsIconPick(usize),
+    WsSave,
+    WsDelete(usize),
     // Custom Visual Editor
     EdTab(usize),
     EdField(usize),
@@ -162,6 +169,7 @@ pub(crate) enum View {
     Wizard,
     GitModal,
     NoteModal,
+    WorkspaceModal,
     CustomEditor,
     Status,
 }
@@ -281,6 +289,10 @@ pub struct App {
     // modal de nota / recordatorio rápido (Mini-TODO)
     pub(crate) note_proj_idx: usize,
     pub(crate) note_text: String,
+    // modal de grupo de trabajo (Workspace)
+    pub(crate) ws_edit_idx: Option<usize>,
+    pub(crate) ws_name: String,
+    pub(crate) ws_icon: String,
     // editor visual de Librerías, Programas y Frameworks
     pub(crate) ed_tab: usize, // 0 = Librerías, 1 = Programas, 2 = Frameworks
     pub(crate) ed_focus: usize,
@@ -382,6 +394,9 @@ impl App {
             git_public: false,
             note_proj_idx: 0,
             note_text: String::new(),
+            ws_edit_idx: None,
+            ws_name: String::new(),
+            ws_icon: String::from("💼"),
             ed_tab: 0,
             ed_focus: 0,
             ed_tpl_idx: 0,
@@ -660,14 +675,11 @@ impl App {
                 let mode_ok = match self.filter_mode {
                     FilterMode::All => true,
                     FilterMode::Workspace(w_idx) => {
-                        let target = match w_idx {
-                            0 => "Trabajo",
-                            1 => "Personal",
-                            2 => "Clientes",
-                            3 => "Pruebas",
-                            _ => "",
-                        };
-                        p.workspace.as_deref() == Some(target)
+                        if let Some(w_def) = self.cfg.workspaces.get(w_idx) {
+                            p.workspace.as_deref().map(|ws| ws.eq_ignore_ascii_case(&w_def.name) || ws.eq_ignore_ascii_case(&w_def.id)).unwrap_or(false)
+                        } else {
+                            false
+                        }
                     }
                     FilterMode::Pinned => p.pinned,
                     FilterMode::GitDirty => self
@@ -866,7 +878,8 @@ impl App {
                 (548.0, 64.0 + rows + 68.0, 26.0)
             }
             View::GitModal => (548.0, 340.0, 26.0),
-            View::NoteModal => (560.0, 360.0, 26.0),
+            View::NoteModal => (540.0, 310.0, 26.0),
+            View::WorkspaceModal => (500.0, 310.0, 26.0),
             View::CustomEditor => (548.0, 495.0, 26.0),
             View::Status => {
                 if self.skind == SKind::Creating || self.skind == SKind::Error {
@@ -953,6 +966,7 @@ impl App {
                 | View::Wizard
                 | View::GitModal
                 | View::NoteModal
+                | View::WorkspaceModal
                 | View::CustomEditor
         ) {
             self.focus();
@@ -981,6 +995,7 @@ impl App {
                 | View::Wizard
                 | View::GitModal
                 | View::NoteModal
+                | View::WorkspaceModal
                 | View::CustomEditor
         ) {
             self.resume_view = Some(self.view);
@@ -1359,7 +1374,7 @@ impl App {
                     self.goto_step(if self.cur_libs_len() > 0 { Step::Libraries } else { Step::Name })
                 }
             },
-            View::Settings | View::GitModal | View::NoteModal => self.set_view(View::Expanded),
+            View::Settings | View::GitModal | View::NoteModal | View::WorkspaceModal => self.set_view(View::Expanded),
             View::CustomEditor => self.set_view(View::Settings),
             View::Expanded if !self.search.is_empty() || self.filter_mode != FilterMode::All => {
                 self.search.clear();
@@ -2021,6 +2036,73 @@ impl App {
                 self.note_text.clear();
                 self.save_project_note();
             }
+            // Workspace Management
+            Hit::AddWorkspace => {
+                self.ws_edit_idx = None;
+                self.ws_name.clear();
+                self.ws_icon = "💼".into();
+                self.set_view(View::WorkspaceModal);
+            }
+            Hit::EditWorkspace(idx) => {
+                if let Some(w) = self.cfg.workspaces.get(idx) {
+                    self.ws_edit_idx = Some(idx);
+                    self.ws_name = w.name.clone();
+                    self.ws_icon = w.icon.clone();
+                    self.set_view(View::WorkspaceModal);
+                }
+            }
+            Hit::WsNameInput => {}
+            Hit::WsIconPick(idx) => {
+                if let Some(&icon) = crate::modals::WS_ICONS.get(idx) {
+                    self.ws_icon = icon.into();
+                    actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                    self.kick();
+                }
+            }
+            Hit::WsSave => {
+                let name = self.ws_name.trim().to_string();
+                if !name.is_empty() {
+                    let icon = if self.ws_icon.trim().is_empty() { "📁".to_string() } else { self.ws_icon.clone() };
+                    if let Some(idx) = self.ws_edit_idx {
+                        if let Some(w) = self.cfg.workspaces.get_mut(idx) {
+                            let old_name = w.name.clone();
+                            w.name = name.clone();
+                            w.icon = icon;
+                            for p in &mut self.cfg.projects {
+                                if p.workspace.as_deref() == Some(&old_name) {
+                                    p.workspace = Some(name.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        let id = name.to_lowercase().replace(' ', "-");
+                        self.cfg.workspaces.push(crate::config::WorkspaceDef {
+                            id,
+                            name,
+                            icon,
+                        });
+                    }
+                    actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                    self.save();
+                }
+                self.set_view(View::Expanded);
+            }
+            Hit::WsDelete(idx) => {
+                if idx < self.cfg.workspaces.len() {
+                    let removed = self.cfg.workspaces.remove(idx);
+                    for p in &mut self.cfg.projects {
+                        if p.workspace.as_deref() == Some(&removed.name) || p.workspace.as_deref() == Some(&removed.id) {
+                            p.workspace = None;
+                        }
+                    }
+                    if self.filter_mode == FilterMode::Workspace(idx) {
+                        self.filter_mode = FilterMode::All;
+                    }
+                    actions::play_ui_sound("delete", self.cfg.sounds_enabled);
+                    self.save();
+                }
+                self.set_view(View::Expanded);
+            }
             // Custom Editor
             Hit::EdTab(t) => {
                 self.ed_tab = t;
@@ -2141,35 +2223,19 @@ impl App {
 
             if let Ok(ws_menu) = CreatePopupMenu() {
                 let cur_ws = p.workspace.as_deref().unwrap_or("");
-                let _ = AppendMenuW(
-                    ws_menu,
-                    if cur_ws == "Trabajo" { MF_STRING | MF_CHECKED } else { MF_STRING },
-                    500,
-                    w!("💼 Trabajo"),
-                );
-                let _ = AppendMenuW(
-                    ws_menu,
-                    if cur_ws == "Personal" { MF_STRING | MF_CHECKED } else { MF_STRING },
-                    501,
-                    w!("🚀 Personal"),
-                );
-                let _ = AppendMenuW(
-                    ws_menu,
-                    if cur_ws == "Clientes" { MF_STRING | MF_CHECKED } else { MF_STRING },
-                    502,
-                    w!("👥 Clientes"),
-                );
-                let _ = AppendMenuW(
-                    ws_menu,
-                    if cur_ws == "Pruebas" { MF_STRING | MF_CHECKED } else { MF_STRING },
-                    503,
-                    w!("🧪 Pruebas / Sandbox"),
-                );
+                for (k, w) in self.cfg.workspaces.iter().enumerate() {
+                    let is_sel = cur_ws.eq_ignore_ascii_case(&w.name) || cur_ws.eq_ignore_ascii_case(&w.id);
+                    let flags = if is_sel { MF_STRING | MF_CHECKED } else { MF_STRING };
+                    let lbl = format!("{} {}", w.icon, w.name);
+                    let _ = AppendMenuW(ws_menu, flags, 500 + k, &HSTRING::from(lbl));
+                }
                 let _ = AppendMenuW(ws_menu, MF_SEPARATOR, 0, None);
+                let _ = AppendMenuW(ws_menu, MF_STRING, 598, w!("+ Crear nuevo grupo..."));
+                let is_none = cur_ws.is_empty();
                 let _ = AppendMenuW(
                     ws_menu,
-                    if cur_ws.is_empty() { MF_STRING | MF_CHECKED } else { MF_STRING },
-                    504,
+                    if is_none { MF_STRING | MF_CHECKED } else { MF_STRING },
+                    599,
                     w!("✖ Sin grupo"),
                 );
                 let _ = AppendMenuW(menu, MF_POPUP, ws_menu.0 as usize, w!("🗂️ Asignar a Grupo de Trabajo"));
@@ -2250,15 +2316,25 @@ impl App {
                 self.note_proj_idx = i;
                 self.note_text = p.note.clone().unwrap_or_default();
                 self.set_view(View::NoteModal);
-            } else if (500..=504).contains(&cmd) {
+            } else if (500..598).contains(&cmd) {
+                let ws_idx = cmd - 500;
+                if let Some(w) = self.cfg.workspaces.get(ws_idx) {
+                    let w_name = w.name.clone();
+                    if let Some(proj) = self.cfg.projects.get_mut(i) {
+                        proj.workspace = Some(w_name);
+                    }
+                    actions::play_ui_sound("tab", self.cfg.sounds_enabled);
+                    self.save();
+                    self.kick();
+                }
+            } else if cmd == 598 {
+                self.ws_edit_idx = None;
+                self.ws_name.clear();
+                self.ws_icon = "💼".into();
+                self.set_view(View::WorkspaceModal);
+            } else if cmd == 599 {
                 if let Some(proj) = self.cfg.projects.get_mut(i) {
-                    proj.workspace = match cmd {
-                        500 => Some("Trabajo".into()),
-                        501 => Some("Personal".into()),
-                        502 => Some("Clientes".into()),
-                        503 => Some("Pruebas".into()),
-                        _ => None,
-                    };
+                    proj.workspace = None;
                 }
                 actions::play_ui_sound("tab", self.cfg.sounds_enabled);
                 self.save();
@@ -2362,6 +2438,37 @@ impl App {
         }
     }
 
+    fn workspace_menu(&mut self, k: usize) {
+        let Some(w) = self.cfg.workspaces.get(k).cloned() else { return };
+        unsafe {
+            let Ok(menu) = CreatePopupMenu() else { return };
+            let _ = AppendMenuW(menu, MF_STRING, 1, &HSTRING::from(format!("✏️ Editar grupo \"{}\"", w.name)));
+            let _ = AppendMenuW(menu, MF_STRING, 2, &HSTRING::from(format!("🗑 Eliminar grupo \"{}\"", w.name)));
+            let mut pt = POINT::default();
+            let _ = GetCursorPos(&mut pt);
+            self.focus();
+            let cmd = TrackPopupMenu(
+                menu,
+                TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                pt.x,
+                pt.y,
+                0,
+                self.hwnd,
+                None,
+            );
+            let _ = DestroyMenu(menu);
+            match cmd.0 {
+                1 => {
+                    self.click(Hit::EditWorkspace(k));
+                }
+                2 => {
+                    self.click(Hit::WsDelete(k));
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn tray_menu(&mut self) {
         unsafe {
             let Ok(menu) = CreatePopupMenu() else { return };
@@ -2444,6 +2551,7 @@ impl App {
             x if x == VK_RETURN.0 as u32 => match self.view {
                 View::Wizard => self.wizard_next(),
                 View::GitModal => self.click(Hit::GitDoCommitPush),
+                View::WorkspaceModal => self.click(Hit::WsSave),
                 View::NoteModal => {
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
                     if shift {
@@ -2464,22 +2572,72 @@ impl App {
                 }
                 _ => {}
             },
+            x if x == VK_RIGHT.0 as u32 && self.view == View::Expanded => {
+                let ws_len = self.cfg.workspaces.len();
+                if ws_len > 0 {
+                    self.filter_mode = match self.filter_mode {
+                        FilterMode::All => FilterMode::Workspace(0),
+                        FilterMode::Workspace(i) => {
+                            if i + 1 < ws_len {
+                                FilterMode::Workspace(i + 1)
+                            } else {
+                                FilterMode::All
+                            }
+                        }
+                        _ => FilterMode::All,
+                    };
+                    self.sel_idx = 0;
+                    self.scroll = 0;
+                    actions::play_ui_sound("tab", self.cfg.sounds_enabled);
+                    self.kick();
+                }
+            }
+            x if x == VK_LEFT.0 as u32 && self.view == View::Expanded => {
+                let ws_len = self.cfg.workspaces.len();
+                if ws_len > 0 {
+                    self.filter_mode = match self.filter_mode {
+                        FilterMode::All => FilterMode::Workspace(ws_len - 1),
+                        FilterMode::Workspace(0) => FilterMode::All,
+                        FilterMode::Workspace(i) => FilterMode::Workspace(i - 1),
+                        _ => FilterMode::All,
+                    };
+                    self.sel_idx = 0;
+                    self.scroll = 0;
+                    actions::play_ui_sound("tab", self.cfg.sounds_enabled);
+                    self.kick();
+                }
+            }
             x if x == VK_DOWN.0 as u32 && self.view == View::Expanded => {
                 let len = self.filtered_projects().len();
                 if len > 0 {
-                    self.sel_idx = (self.sel_idx + 1).min(len - 1);
+                    if self.sel_idx + 1 < len {
+                        self.sel_idx += 1;
+                    } else {
+                        self.sel_idx = 0;
+                    }
                     if self.sel_idx >= self.scroll + MAX_ROWS {
                         self.scroll = self.sel_idx + 1 - MAX_ROWS;
+                    } else if self.sel_idx < self.scroll {
+                        self.scroll = self.sel_idx;
                     }
                     self.kick();
                 }
             }
             x if x == VK_UP.0 as u32 && self.view == View::Expanded => {
-                self.sel_idx = self.sel_idx.saturating_sub(1);
-                if self.sel_idx < self.scroll {
-                    self.scroll = self.sel_idx;
+                let len = self.filtered_projects().len();
+                if len > 0 {
+                    if self.sel_idx > 0 {
+                        self.sel_idx -= 1;
+                    } else {
+                        self.sel_idx = len - 1;
+                    }
+                    if self.sel_idx < self.scroll {
+                        self.scroll = self.sel_idx;
+                    } else if self.sel_idx >= self.scroll + MAX_ROWS {
+                        self.scroll = self.sel_idx + 1 - MAX_ROWS;
+                    }
+                    self.kick();
                 }
-                self.kick();
             }
             0x31..=0x39 if ctrl && self.view == View::Expanded => {
                 let filtered = self.filtered_projects();
@@ -2555,6 +2713,22 @@ impl App {
                     let Some(ch) = char::from_u32(c) else { return Some(0) };
                     if !ch.is_control() && self.note_text.chars().count() < 1000 {
                         self.note_text.push(ch);
+                        self.kick();
+                    }
+                    return Some(0);
+                }
+            },
+            View::WorkspaceModal => match c {
+                8 => {
+                    self.ws_name.pop();
+                    self.kick();
+                    return Some(0);
+                }
+                13 | 27 | 9 => return Some(0),
+                _ => {
+                    let Some(ch) = char::from_u32(c) else { return Some(0) };
+                    if !ch.is_control() && self.ws_name.chars().count() < 24 {
+                        self.ws_name.push(ch);
                         self.kick();
                     }
                     return Some(0);
@@ -2717,6 +2891,9 @@ impl App {
                         | Some(Hit::ProjTerm(i))
                         | Some(Hit::ProjExplorer(i))
                         | Some(Hit::ProjPin(i)) => self.project_menu(i),
+                        Some(Hit::FilterChip(FilterMode::Workspace(k))) | Some(Hit::EditWorkspace(k)) => {
+                            self.workspace_menu(k);
+                        }
                         Some(Hit::PortBadge(port)) => {
                             actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
                         }

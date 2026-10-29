@@ -17,6 +17,8 @@ pub struct Config {
     pub monitor_mode: String,
     #[serde(default = "d_true")]
     pub sounds_enabled: bool,
+    #[serde(default = "d_workspaces")]
+    pub workspaces: Vec<WorkspaceDef>,
     #[serde(default)]
     pub launchers: Vec<Launcher>,
     #[serde(default)]
@@ -35,6 +37,22 @@ fn d_true() -> bool {
 
 fn d_monitor() -> String {
     "primary".into()
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WorkspaceDef {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+}
+
+fn d_workspaces() -> Vec<WorkspaceDef> {
+    vec![
+        WorkspaceDef { id: "trabajo".into(), name: "Trabajo".into(), icon: "💼".into() },
+        WorkspaceDef { id: "personal".into(), name: "Personal".into(), icon: "🚀".into() },
+        WorkspaceDef { id: "clientes".into(), name: "Clientes".into(), icon: "👥".into() },
+        WorkspaceDef { id: "pruebas".into(), name: "Pruebas".into(), icon: "🧪".into() },
+    ]
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
