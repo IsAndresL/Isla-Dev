@@ -50,6 +50,13 @@ impl App {
             }
             if let Ok(border) = g.top_panel_curve_path(x + 0.5, w - 1.0, h - 0.5, r) {
                 g.stroke_path(&border, WHITE, 0.14, 1.0);
+                if let Some(prog) = self.bg_progress {
+                    let f = prog.clamp(0.05, 1.0);
+                    g.clip(x - 2.0, 0.0, (w + 4.0) * f, h + 6.0);
+                    g.stroke_path(&border, GREEN, 0.30, 4.5);
+                    g.stroke_path(&border, GREEN, 0.95, 2.0);
+                    g.unclip();
+                }
             }
         }
 

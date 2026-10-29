@@ -1664,11 +1664,15 @@ impl App {
                         }
                     }
                     self.set_view(View::Compact);
+                } else if self.view == View::Status && self.skind == SKind::Creating {
+                    // Al hacer clic en el banner mientras crea/clona/sube, minimizar a la gota con barra de progreso en el borde
+                    self.resume_view = Some(View::Status);
+                    self.set_view(View::Compact);
+                } else if self.view == View::Compact && self.bg_progress.is_some() {
+                    self.set_view(View::Status);
                 } else {
                     self.reload_if_changed();
-                    if self.view != View::Status || self.skind != SKind::Creating {
-                        self.reopen_preserved_view();
-                    }
+                    self.reopen_preserved_view();
                 }
             }
             Hit::Close => {
@@ -2647,8 +2651,8 @@ impl App {
                 WM_KEYDOWN => self.key(wp.0 as u32),
                 WM_CHAR => self.chr(wp.0 as u32),
                 WM_ACTIVATE => {
-                    if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE
-                        && matches!(
+                    if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE {
+                        if matches!(
                             self.view,
                             View::Expanded
                                 | View::Settings
@@ -2656,9 +2660,14 @@ impl App {
                                 | View::GitModal
                                 | View::NoteModal
                                 | View::CustomEditor
-                        )
-                    {
-                        self.minimize_preserving_state();
+                        ) {
+                            self.minimize_preserving_state();
+                        } else if self.view == View::Status && self.skind == SKind::Creating {
+                            // Si el usuario sigue trabajando en otra app mientras crea o hace git push,
+                            // se contrae a la gota mostrando la barra de progreso luminosa en el borde curvo
+                            self.resume_view = Some(View::Status);
+                            self.set_view(View::Compact);
+                        }
                     }
                     let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
                     if self.visible && !self.auto_hidden_fs {
