@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use windows::core::*;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
@@ -897,21 +898,22 @@ impl App {
         let dt = (now - self.last).as_secs_f32().min(0.05);
         self.last = now;
         // Si estamos en la gota (View::Compact) y hay un hover activo en Hit::Pill,
-        // validar con la posición física real del cursor para evitar hover fantasma o desincronizado.
+        // validar con la posición física real del cursor usando ScreenToClient y self.hit_at
+        // para evitar hover fantasma o que se quede palpitando indefinidamente.
         if self.view == View::Compact && self.hover == Some(Hit::Pill) {
             let mut pt = POINT::default();
             if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                unsafe {
+                    let _ = ScreenToClient(self.hwnd, &mut pt);
+                }
                 let scale = self.gfx.scale;
-                let cx_screen = self.pos.0 + ((WIN_W / 2.0) * scale) as i32;
-                let half_w = ((self.sw.x.max(48.0) * 0.5 + 8.0) * scale) as i32;
-                let max_h = ((self.sh.x.max(10.0) + 6.0) * scale) as i32;
-                if pt.x < cx_screen - half_w
-                    || pt.x > cx_screen + half_w
-                    || pt.y < self.pos.1
-                    || pt.y > self.pos.1 + max_h
-                {
+                let cx = pt.x as f32 / scale;
+                let cy = pt.y as f32 / scale;
+                if self.hit_at(cx, cy) != Some(Hit::Pill) {
                     self.hover = None;
                     self.tracking = false;
+                    self.glow_anim = 0.0;
+                    self.kick();
                 }
             }
         }
@@ -927,10 +929,12 @@ impl App {
 
         let is_hov = self.view == View::Compact && self.hov(Hit::Pill);
         if is_hov {
-            self.glow_anim = (self.glow_anim + dt * 6.0) % std::f32::consts::TAU;
-            moving = true;
+            if self.glow_anim < 1.0 {
+                self.glow_anim = (self.glow_anim + dt * 8.0).min(1.0);
+                moving = true;
+            }
         } else if self.glow_anim > 0.0 {
-            self.glow_anim = (self.glow_anim - dt * 4.0).max(0.0);
+            self.glow_anim = (self.glow_anim - dt * 8.0).max(0.0);
             moving = true;
         }
 
@@ -2640,6 +2644,7 @@ impl App {
                     } else if self.sel_idx < self.scroll {
                         self.scroll = self.sel_idx;
                     }
+                    self.hover = None;
                     self.kick();
                 }
             }
@@ -2656,6 +2661,7 @@ impl App {
                     } else if self.sel_idx >= self.scroll + MAX_ROWS {
                         self.scroll = self.sel_idx + 1 - MAX_ROWS;
                     }
+                    self.hover = None;
                     self.kick();
                 }
             }
@@ -2862,27 +2868,7 @@ impl App {
                         self.tracking = true;
                     }
                     let (x, y) = self.mpos(lp);
-                    let mut h = self.hit_at(x, y);
-
-                    // Si en vista compacta detecta Hit::Pill, validar que el cursor físico de la pantalla
-                    // realmente esté dentro del área visible de la gota para ignorar eventos sintetizados por Windows.
-                    if self.view == View::Compact && h == Some(Hit::Pill) {
-                        let mut pt = POINT::default();
-                        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
-                            let scale = self.gfx.scale;
-                            let cx_screen = self.pos.0 + ((WIN_W / 2.0) * scale) as i32;
-                            let half_w = ((self.sw.x.max(48.0) * 0.5 + 8.0) * scale) as i32;
-                            let max_h = ((self.sh.x.max(10.0) + 6.0) * scale) as i32;
-                            if pt.x < cx_screen - half_w
-                                || pt.x > cx_screen + half_w
-                                || pt.y < self.pos.1
-                                || pt.y > self.pos.1 + max_h
-                            {
-                                h = None;
-                            }
-                        }
-                    }
-
+                    let h = self.hit_at(x, y);
                     if h != self.hover {
                         self.hover = h;
                         self.kick();
@@ -2996,6 +2982,7 @@ impl App {
                         if self.hover.is_some() {
                             self.hover = None;
                             self.tracking = false;
+                            self.glow_anim = 0.0;
                             self.kick();
                         }
                         if matches!(
@@ -3024,7 +3011,6 @@ impl App {
                 WM_WINDOWPOSCHANGING => {
                     let ppos = lp.0 as *mut WINDOWPOS;
                     if !ppos.is_null() {
-                        (*ppos).hwndInsertAfter = HWND_TOPMOST;
                         if self.visible && !self.auto_hidden_fs {
                             (*ppos).flags &= !SWP_HIDEWINDOW;
                         }

@@ -2098,6 +2098,30 @@ pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
             return;
         }
 
+        // Si la ventana activa en primer plano es la barra de tareas, el menú inicio o el explorador,
+        // no intervenir con el Z-order para no competir con el menú inicio de Windows ni causar parpadeo/ocultación.
+        let fg = GetForegroundWindow();
+        if !fg.0.is_null() {
+            if fg == tray || GetAncestor(fg, GA_ROOT) == tray {
+                return;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(fg, Some(&mut pid));
+            if let Some(exe) = get_process_exe_path(pid) {
+                let elow = exe.to_lowercase();
+                if elow.ends_with(r"\explorer.exe")
+                    || elow.ends_with(r"\shellexperiencehost.exe")
+                    || elow.ends_with(r"\startmenuexperiencehost.exe")
+                    || elow.ends_with(r"\searchhost.exe")
+                    || elow.contains("startallback")
+                    || elow.contains("windhawk")
+                    || elow.contains("startmenu")
+                {
+                    return;
+                }
+            }
+        }
+
         // Solo intervenir si la barra de tareas y la isla se intersectan físicamente en la pantalla.
         // Si la barra está abajo (como es habitual en Windows 11), nunca se tocan ni compiten por Z-Order.
         let mut tray_rc = RECT::default();
@@ -2166,6 +2190,9 @@ pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
                     | "Windows.UI.Input.InputSite.WindowClass"
                     | "ApplicationFrameWindow"
                     | "CabinetWClass"
+                    | "Shell_LightDismissOverlay"
+                    | "StartMenuWindow"
+                    | "DV2ControlHost"
             )
             || clow.contains("tray")
             || clow.contains("xaml")
@@ -2175,6 +2202,9 @@ pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
             || clow.contains("tooltip")
             || clow.contains("popup")
             || clow.contains("flyout")
+            || clow.contains("startmenu")
+            || clow.contains("startallback")
+            || clow.contains("dismiss")
         {
             return false;
         }
@@ -2205,6 +2235,10 @@ pub fn is_other_fullscreen(our_hwnd: HWND, mon_rc: RECT) -> bool {
             || elow.ends_with("\\widgets.exe")
             || elow.ends_with("\\lockapp.exe")
             || elow.ends_with("\\systemsettings.exe")
+            || elow.contains("startallback")
+            || elow.contains("windhawk")
+            || elow.contains("translucenttb")
+            || elow.contains("retrobar")
             || elow.contains("isla-dev")
             || elow.contains("isladev")
         {

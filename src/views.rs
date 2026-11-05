@@ -13,7 +13,7 @@ impl App {
         let is_compact = self.view == View::Compact && w < 260.0 && h < 42.0;
 
         if is_compact {
-            let glow_t = self.glow_anim.sin() * 0.5 + 0.5;
+            let glow_t = self.glow_anim.clamp(0.0, 1.0);
             if self.glow_anim > 0.01 {
                 g.draw_glow_ring(cx, w, h, glow_t);
             }
@@ -500,7 +500,7 @@ impl App {
         } else {
             for (vis_pos, &i) in filtered.iter().enumerate().skip(sc).take(MAX_ROWS) {
                 let p = &self.cfg.projects[i];
-                let is_sel = vis_pos == sel && !self.search.is_empty();
+                let is_sel = vis_pos == sel;
                 let row_hov = self.is_row_hov(i);
                 let row_x = lx + 16.0;
                 let row_w = left_w - 24.0;
@@ -554,8 +554,8 @@ impl App {
                 let btn_y = ry + 10.0;
                 let btn_h = 28.0;
 
-                if row_hov {
-                    // --- FILA EN HOVER: Mostrar todos los controles interactivos con sus cajas ---
+                if row_hov || is_sel {
+                    // --- FILA EN HOVER O SELECCIÓN POR TECLADO: Mostrar todos los controles interactivos con sus cajas ---
                     rx -= 28.0;
                     self.mini_action_btn(
                         rx,
