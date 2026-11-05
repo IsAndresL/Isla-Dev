@@ -438,7 +438,7 @@ impl App {
         unsafe {
             DragAcceptFiles(self.hwnd, true);
             SetTimer(self.hwnd, TIMER_POLL, 4500, None);
-            SetTimer(self.hwnd, TIMER_TOPMOST, 180, None);
+            SetTimer(self.hwnd, TIMER_TOPMOST, 1500, None);
         }
         self.kick();
     }
@@ -896,6 +896,26 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.05);
         self.last = now;
+        // Si estamos en la gota (View::Compact) y hay un hover activo en Hit::Pill,
+        // validar con la posición física real del cursor para evitar hover fantasma o desincronizado.
+        if self.view == View::Compact && self.hover == Some(Hit::Pill) {
+            let mut pt = POINT::default();
+            if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                let scale = self.gfx.scale;
+                let cx_screen = self.pos.0 + ((WIN_W / 2.0) * scale) as i32;
+                let half_w = ((self.sw.x.max(48.0) * 0.5 + 8.0) * scale) as i32;
+                let max_h = ((self.sh.x.max(10.0) + 6.0) * scale) as i32;
+                if pt.x < cx_screen - half_w
+                    || pt.x > cx_screen + half_w
+                    || pt.y < self.pos.1
+                    || pt.y > self.pos.1 + max_h
+                {
+                    self.hover = None;
+                    self.tracking = false;
+                }
+            }
+        }
+
         let (tw, th, tr) = self.target();
         self.sw.t = tw;
         self.sh.t = th;
@@ -2842,7 +2862,27 @@ impl App {
                         self.tracking = true;
                     }
                     let (x, y) = self.mpos(lp);
-                    let h = self.hit_at(x, y);
+                    let mut h = self.hit_at(x, y);
+
+                    // Si en vista compacta detecta Hit::Pill, validar que el cursor físico de la pantalla
+                    // realmente esté dentro del área visible de la gota para ignorar eventos sintetizados por Windows.
+                    if self.view == View::Compact && h == Some(Hit::Pill) {
+                        let mut pt = POINT::default();
+                        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                            let scale = self.gfx.scale;
+                            let cx_screen = self.pos.0 + ((WIN_W / 2.0) * scale) as i32;
+                            let half_w = ((self.sw.x.max(48.0) * 0.5 + 8.0) * scale) as i32;
+                            let max_h = ((self.sh.x.max(10.0) + 6.0) * scale) as i32;
+                            if pt.x < cx_screen - half_w
+                                || pt.x > cx_screen + half_w
+                                || pt.y < self.pos.1
+                                || pt.y > self.pos.1 + max_h
+                            {
+                                h = None;
+                            }
+                        }
+                    }
+
                     if h != self.hover {
                         self.hover = h;
                         self.kick();
@@ -2953,6 +2993,11 @@ impl App {
                 WM_CHAR => self.chr(wp.0 as u32),
                 WM_ACTIVATE => {
                     if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE {
+                        if self.hover.is_some() {
+                            self.hover = None;
+                            self.tracking = false;
+                            self.kick();
+                        }
                         if matches!(
                             self.view,
                             View::Expanded
@@ -2960,6 +3005,7 @@ impl App {
                                 | View::Wizard
                                 | View::GitModal
                                 | View::NoteModal
+                                | View::WorkspaceModal
                                 | View::CustomEditor
                         ) {
                             self.minimize_preserving_state();

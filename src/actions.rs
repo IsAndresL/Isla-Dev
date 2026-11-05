@@ -1246,11 +1246,11 @@ pub const COMMON_DEV_PORTS: &[u16] = &[
 /// Comprueba si un puerto local está abierto tanto en IPv4 (`127.0.0.1`) como en IPv6 (`[::1]`).
 pub fn is_port_open(port: u16) -> bool {
     let v4 = SocketAddr::from(([127, 0, 0, 1], port));
-    if TcpStream::connect_timeout(&v4, Duration::from_millis(14)).is_ok() {
+    if TcpStream::connect_timeout(&v4, Duration::from_millis(50)).is_ok() {
         return true;
     }
     let v6 = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port));
-    TcpStream::connect_timeout(&v6, Duration::from_millis(14)).is_ok()
+    TcpStream::connect_timeout(&v6, Duration::from_millis(50)).is_ok()
 }
 
 pub fn current_open_ports() -> Vec<u16> {
@@ -2098,10 +2098,24 @@ pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
             return;
         }
 
+        // Solo intervenir si la barra de tareas y la isla se intersectan físicamente en la pantalla.
+        // Si la barra está abajo (como es habitual en Windows 11), nunca se tocan ni compiten por Z-Order.
+        let mut tray_rc = RECT::default();
+        let mut our_rc = RECT::default();
+        if GetWindowRect(tray, &mut tray_rc).is_ok() && GetWindowRect(our_hwnd, &mut our_rc).is_ok() {
+            let intersects = our_rc.left < tray_rc.right
+                && our_rc.right > tray_rc.left
+                && our_rc.top < tray_rc.bottom
+                && our_rc.bottom > tray_rc.top;
+            if !intersects {
+                return;
+            }
+        }
+
         let mut cur = GetWindow(our_hwnd, GW_HWNDPREV).unwrap_or_default();
         let mut tray_is_above = false;
         let mut steps = 0;
-        while !cur.0.is_null() && steps < 48 {
+        while !cur.0.is_null() && steps < 32 {
             if cur == tray {
                 tray_is_above = true;
                 break;
@@ -2120,16 +2134,7 @@ pub fn ensure_island_above_taskbar(our_hwnd: HWND) {
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSENDCHANGING,
-        );
-        let _ = SetWindowPos(
-            tray,
-            our_hwnd,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOSENDCHANGING,
         );
     }
 }
