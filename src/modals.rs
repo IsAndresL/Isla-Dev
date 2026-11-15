@@ -3,7 +3,8 @@ use crate::app::*;
 use crate::config::{APP_AUTHOR, APP_VERSION};
 
 pub const WS_ICONS: &[&str] = &[
-    "💼", "🚀", "👥", "🧪", "📁", "⚡", "💻", "🛠️", "🎯", "🔥", "📦", "🌐", "🤖", "🎨", "🎮", "🔒",
+    "\u{E821}", "\u{E77B}", "\u{E716}", "\u{E945}", "\u{E8B7}", "\u{E943}", "\u{E90F}", "\u{E734}",
+    "\u{E7B8}", "\u{E774}", "\u{E99A}", "\u{E790}", "\u{E7FC}", "\u{E72E}", "\u{E753}", "\u{E80F}",
 ];
 
 impl App {
@@ -141,7 +142,7 @@ impl App {
         }
 
         // Pie de firma solicitado por el usuario + acceso opcional a config.toml
-        let footer = format!("Desarrollado por {} · {}", APP_AUTHOR, APP_VERSION);
+        let footer = format!("{} · {}", APP_AUTHOR, APP_VERSION);
         g.text(&footer, &g.f.tiny_c, lx + 16.0, ry + 4.0, tw - 32.0, 18.0, GRAY, 0.9);
         let cfg_hov = self.hov(Hit::EditConfig);
         g.text(
@@ -607,7 +608,16 @@ impl App {
                 if is_sel { 0.9 } else { 0.6 },
                 1.0,
             );
-            g.text(ico, &g.f.body, ix, ry + 2.0, icon_sz, icon_sz - 4.0, WHITE, 1.0);
+            g.text(
+                ico,
+                &g.f.icon,
+                ix,
+                ry,
+                icon_sz,
+                icon_sz,
+                if is_sel || hov { WHITE } else { GRAY },
+                1.0,
+            );
             self.hit(ix, ry, icon_sz, icon_sz, Hit::WsIconPick(k));
             ix += icon_sz + spacing;
             if (k + 1) % 8 == 0 {

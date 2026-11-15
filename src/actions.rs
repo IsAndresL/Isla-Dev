@@ -6,6 +6,7 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -63,9 +64,6 @@ pub struct FullStackInfo {
 impl FullStackInfo {
     pub fn is_fullstack(&self) -> bool {
         self.front.is_some() && self.back.is_some()
-    }
-    pub fn has_any(&self) -> bool {
-        self.front.is_some() || self.back.is_some() || self.main.is_some()
     }
 }
 
@@ -407,6 +405,15 @@ pub fn short(s: &str) -> String {
     }
 }
 
+pub fn folder_modified_unix(path: &Path) -> u64 {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Escanea la carpeta base y descubre todas las carpetas preexistentes.
 pub fn scan_base_dir(base: &Path) -> Vec<Project> {
     let mut list = Vec::new();
@@ -432,7 +439,7 @@ pub fn scan_base_dir(base: &Path) -> Vec<Project> {
             stack,
             color,
             launcher: None,
-            last_opened: 0,
+            last_opened: folder_modified_unix(&p),
             pinned: false,
             note: None,
             workspace: None,
@@ -1246,21 +1253,51 @@ pub const COMMON_DEV_PORTS: &[u16] = &[
 /// Comprueba si un puerto local está abierto tanto en IPv4 (`127.0.0.1`) como en IPv6 (`[::1]`).
 pub fn is_port_open(port: u16) -> bool {
     let v4 = SocketAddr::from(([127, 0, 0, 1], port));
-    if TcpStream::connect_timeout(&v4, Duration::from_millis(50)).is_ok() {
+    if TcpStream::connect_timeout(&v4, Duration::from_millis(35)).is_ok() {
         return true;
     }
     let v6 = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port));
-    TcpStream::connect_timeout(&v6, Duration::from_millis(50)).is_ok()
+    TcpStream::connect_timeout(&v6, Duration::from_millis(25)).is_ok()
+}
+
+/// Escanea una lista de puertos en paralelo con hasta 4 hilos para evitar demoras secuenciales.
+fn scan_ports_parallel(ports: &[u16]) -> Vec<u16> {
+    if ports.is_empty() {
+        return Vec::new();
+    }
+    let next_idx = AtomicUsize::new(0);
+    let results = Mutex::new(Vec::new());
+    let workers = ports.len().min(4);
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                let mut local_open = Vec::new();
+                loop {
+                    let idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                    if idx >= ports.len() {
+                        break;
+                    }
+                    let port = ports[idx];
+                    if is_port_open(port) {
+                        local_open.push(port);
+                    }
+                }
+                if !local_open.is_empty() {
+                    if let Ok(mut guard) = results.lock() {
+                        guard.extend(local_open);
+                    }
+                }
+            });
+        }
+    });
+    let mut open = results.into_inner().unwrap_or_default();
+    open.sort_unstable();
+    open.dedup();
+    open
 }
 
 pub fn current_open_ports() -> Vec<u16> {
-    let mut open = Vec::new();
-    for &port in COMMON_DEV_PORTS {
-        if is_port_open(port) {
-            open.push(port);
-        }
-    }
-    open
+    scan_ports_parallel(COMMON_DEV_PORTS)
 }
 
 /// Extrae el número de puerto desde una línea de consola como `http://localhost:5174/` o `127.0.0.1:4321`.
@@ -1286,6 +1323,39 @@ pub fn server_log_path(project_name: &str) -> PathBuf {
     config::logs_dir().join(format!("srv-{}.log", safe_slug(project_name)))
 }
 
+/// Lee líneas de un stream (stdout o stderr) del servidor manteniendo el log abierto y detectando puertos.
+fn spawn_server_stream_reader<R: std::io::Read + Send + 'static>(
+    stream: R,
+    log_path: PathBuf,
+    tx: Sender<WorkMsg>,
+    path_str: String,
+    pid: u32,
+    found_port: Arc<Mutex<Option<u16>>>,
+    hwnd: isize,
+) {
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        let mut log_file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
+        for line in reader.lines().map_while(std::result::Result::ok) {
+            if let Some(f) = log_file.as_mut() {
+                let _ = writeln!(f, "{line}");
+            }
+            if let Some(port) = extract_port_from_line(&line) {
+                let mut guard = found_port.lock().unwrap();
+                if *guard != Some(port) {
+                    *guard = Some(port);
+                    let _ = tx.send(WorkMsg::ServerPort {
+                        path: path_str.clone(),
+                        pid,
+                        port,
+                    });
+                    notify_hwnd(hwnd);
+                }
+            }
+        }
+    });
+}
+
 /// Inicia el servidor de desarrollo capturando su salida en vivo en un archivo de log,
 /// detectando su puerto exacto desde stdout/stderr (y por socket IPv4/IPv6 sin colisionar con otros servidores),
 /// y notificando inmediatamente si ocurre un error al iniciar.
@@ -1298,13 +1368,6 @@ pub fn start_dev_server(
     tx: Sender<WorkMsg>,
     hwnd: isize,
 ) -> std::result::Result<(u32, PathBuf), String> {
-    let mut before_ports = current_open_ports();
-    for p in already_used_ports {
-        if !before_ports.contains(&p) {
-            before_ports.push(p);
-        }
-    }
-
     let log_path = server_log_path(&project_name);
     {
         let mut f = File::create(&log_path).map_err(|e| e.to_string())?;
@@ -1332,65 +1395,39 @@ pub fn start_dev_server(
     let path_str = project_path.to_string_lossy().to_string();
     let found_port = Arc::new(Mutex::new(None::<u16>));
 
-    // Lector en tiempo real de stdout
+    // Lectores en tiempo real de stdout y stderr (mantienen un solo handle abierto al log)
     if let Some(out) = stdout {
-        let log_c = log_path.clone();
-        let tx_c = tx.clone();
-        let path_c = path_str.clone();
-        let fp_c = Arc::clone(&found_port);
-        std::thread::spawn(move || {
-            let reader = BufReader::new(out);
-            for line in reader.lines().flatten() {
-                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_c) {
-                    let _ = writeln!(f, "{line}");
-                }
-                if let Some(port) = extract_port_from_line(&line) {
-                    let mut guard = fp_c.lock().unwrap();
-                    if *guard != Some(port) {
-                        *guard = Some(port);
-                        let _ = tx_c.send(WorkMsg::ServerPort {
-                            path: path_c.clone(),
-                            pid,
-                            port,
-                        });
-                        notify_hwnd(hwnd);
-                    }
-                }
-            }
-        });
+        spawn_server_stream_reader(
+            out,
+            log_path.clone(),
+            tx.clone(),
+            path_str.clone(),
+            pid,
+            Arc::clone(&found_port),
+            hwnd,
+        );
     }
-
-    // Lector en tiempo real de stderr
     if let Some(err) = stderr {
-        let log_c = log_path.clone();
-        let tx_c = tx.clone();
-        let path_c = path_str.clone();
-        let fp_c = Arc::clone(&found_port);
-        std::thread::spawn(move || {
-            let reader = BufReader::new(err);
-            for line in reader.lines().flatten() {
-                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_c) {
-                    let _ = writeln!(f, "{line}");
-                }
-                if let Some(port) = extract_port_from_line(&line) {
-                    let mut guard = fp_c.lock().unwrap();
-                    if *guard != Some(port) {
-                        *guard = Some(port);
-                        let _ = tx_c.send(WorkMsg::ServerPort {
-                            path: path_c.clone(),
-                            pid,
-                            port,
-                        });
-                        notify_hwnd(hwnd);
-                    }
-                }
-            }
-        });
+        spawn_server_stream_reader(
+            err,
+            log_path.clone(),
+            tx.clone(),
+            path_str.clone(),
+            pid,
+            Arc::clone(&found_port),
+            hwnd,
+        );
     }
 
-    // Hilo vigilante del proceso y respaldo de escaneo de nuevos puertos (sin colisionar con puertos previos)
+    // Hilo vigilante del proceso y respaldo de escaneo de nuevos puertos (fuera del hilo UI)
     let log_w = log_path.clone();
     std::thread::spawn(move || {
+        let mut before_ports = current_open_ports();
+        for p in already_used_ports {
+            if !before_ports.contains(&p) {
+                before_ports.push(p);
+            }
+        }
         let mut checks = 0;
         loop {
             match child.try_wait() {
@@ -1581,12 +1618,8 @@ pub fn scan_open_ports(extra_ports: Vec<u16>, tx: Sender<WorkMsg>, hwnd: isize) 
             }
         }
         ports.sort_unstable();
-        let mut active = Vec::new();
-        for port in ports {
-            if is_port_open(port) {
-                active.push(port);
-            }
-        }
+        ports.dedup();
+        let active = scan_ports_parallel(&ports);
         let _ = tx.send(WorkMsg::ActivePorts(active));
         notify_hwnd(hwnd);
     });
@@ -2303,22 +2336,13 @@ pub fn play_ui_sound(sound_name: &str, enabled: bool) {
     }
 }
 
-pub fn relative_time_string(last_opened: u64, path: &str) -> String {
+pub fn relative_time_string(last_opened: u64, _path: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let ts = if last_opened > 0 {
-        last_opened
-    } else {
-        std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    };
+    let ts = last_opened;
 
     if ts == 0 || now < ts {
         return "sin actividad".to_string();

@@ -29,6 +29,7 @@ pub struct Fonts {
     pub input: IDWriteTextFormat,
     pub icon: IDWriteTextFormat,
     pub icon_sm: IDWriteTextFormat,
+    pub icon_xs: IDWriteTextFormat,
 }
 
 pub struct Gfx {
@@ -133,6 +134,7 @@ impl Fonts {
             input: fmt(dw, &ui, 15.0, DWRITE_FONT_WEIGHT_NORMAL, l)?,
             icon: fmt(dw, icon_family, 16.0, DWRITE_FONT_WEIGHT_NORMAL, c)?,
             icon_sm: fmt(dw, icon_family, 12.0, DWRITE_FONT_WEIGHT_NORMAL, c)?,
+            icon_xs: fmt(dw, icon_family, 9.5, DWRITE_FONT_WEIGHT_NORMAL, c)?,
         })
     }
 }
@@ -817,6 +819,28 @@ impl Gfx {
             let _ = DeleteObject(bmp);
             let _ = DeleteDC(dc);
             icon
+        }
+    }
+}
+
+impl Drop for Gfx {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.memdc.is_invalid() {
+                if !self.old.is_invalid() {
+                    SelectObject(self.memdc, self.old);
+                    self.old = HGDIOBJ::default();
+                }
+                if !self.bmp.is_invalid() {
+                    let _ = DeleteObject(self.bmp);
+                    self.bmp = HBITMAP::default();
+                }
+                let _ = DeleteDC(self.memdc);
+                self.memdc = HDC::default();
+            } else if !self.bmp.is_invalid() {
+                let _ = DeleteObject(self.bmp);
+                self.bmp = HBITMAP::default();
+            }
         }
     }
 }

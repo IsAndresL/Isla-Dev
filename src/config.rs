@@ -46,12 +46,38 @@ pub struct WorkspaceDef {
     pub icon: String,
 }
 
+pub fn normalize_ws_icon(icon: &str) -> String {
+    let t = icon.trim();
+    match t {
+        "💼" => "\u{E821}".into(),
+        "🚀" | "🔥" | "⚡" => "\u{E945}".into(),
+        "👥" => "\u{E716}".into(),
+        "🧪" | "💻" => "\u{E943}".into(),
+        "📁" | "" => "\u{E8B7}".into(),
+        "🛠️" => "\u{E90F}".into(),
+        "🎯" => "\u{E734}".into(),
+        "📦" => "\u{E7B8}".into(),
+        "🌐" => "\u{E774}".into(),
+        "🤖" => "\u{E99A}".into(),
+        "🎨" => "\u{E790}".into(),
+        "🎮" => "\u{E7FC}".into(),
+        "🔒" => "\u{E72E}".into(),
+        _ => {
+            if t.chars().all(|c| ('\u{E000}'..='\u{F8FF}').contains(&c)) {
+                t.to_string()
+            } else {
+                "\u{E8B7}".into()
+            }
+        }
+    }
+}
+
 fn d_workspaces() -> Vec<WorkspaceDef> {
     vec![
-        WorkspaceDef { id: "trabajo".into(), name: "Trabajo".into(), icon: "💼".into() },
-        WorkspaceDef { id: "personal".into(), name: "Personal".into(), icon: "🚀".into() },
-        WorkspaceDef { id: "clientes".into(), name: "Clientes".into(), icon: "👥".into() },
-        WorkspaceDef { id: "pruebas".into(), name: "Pruebas".into(), icon: "🧪".into() },
+        WorkspaceDef { id: "trabajo".into(), name: "Trabajo".into(), icon: "\u{E821}".into() },
+        WorkspaceDef { id: "personal".into(), name: "Personal".into(), icon: "\u{E77B}".into() },
+        WorkspaceDef { id: "clientes".into(), name: "Clientes".into(), icon: "\u{E716}".into() },
+        WorkspaceDef { id: "pruebas".into(), name: "Pruebas".into(), icon: "\u{E945}".into() },
     ]
 }
 
@@ -134,7 +160,7 @@ impl Config {
             changed = true;
         }
 
-        // 2. Agregar carpetas nuevas y actualizar stack si antes era "Solo carpeta"
+        // 2. Agregar carpetas nuevas, actualizar stack si antes era "Solo carpeta" y asegurar timestamp
         for p in scanned {
             if let Some(existing) = self
                 .projects
@@ -144,6 +170,10 @@ impl Config {
                 if existing.stack == "Solo carpeta" && p.stack != "Solo carpeta" {
                     existing.stack = p.stack;
                     existing.color = p.color;
+                    changed = true;
+                }
+                if existing.last_opened == 0 && p.last_opened > 0 {
+                    existing.last_opened = p.last_opened;
                     changed = true;
                 }
             } else {
@@ -237,12 +267,23 @@ pub fn load() -> (Config, Option<String>) {
     match std::fs::read_to_string(&path) {
         Ok(s) => match toml::from_str::<Config>(&s) {
             Ok(mut c) => {
+                let mut needs_save = false;
                 if c.launchers.is_empty() {
                     c.launchers = default_config().launchers;
                 }
                 if c.templates.is_empty() {
                     c.templates = default_config().templates;
                 } else if upgrade_templates(&mut c) {
+                    needs_save = true;
+                }
+                for w in &mut c.workspaces {
+                    let norm = normalize_ws_icon(&w.icon);
+                    if norm != w.icon {
+                        w.icon = norm;
+                        needs_save = true;
+                    }
+                }
+                if needs_save {
                     save(&c);
                 }
                 c.sort_projects();

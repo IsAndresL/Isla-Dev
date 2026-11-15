@@ -309,10 +309,10 @@ impl App {
             let count = self.cfg.projects.iter().filter(|p| {
                 p.workspace.as_deref().map(|ws| ws.eq_ignore_ascii_case(&w.name) || ws.eq_ignore_ascii_case(&w.id)).unwrap_or(false)
             }).count();
-            let label = format!("{} {} ({count})", w.icon, w.name);
+            let label = format!("{} ({count})", w.name);
             let active = self.filter_mode == FilterMode::Workspace(k);
             let hov = self.hov(Hit::FilterChip(FilterMode::Workspace(k)));
-            let cw = g.measure(&label, &g.f.tiny) + 18.0;
+            let cw = g.measure(&label, &g.f.tiny) + 29.0;
             g.rrect(
                 row1_x,
                 cur_y,
@@ -333,7 +333,8 @@ impl App {
                 1.0,
             );
             let txt_col = if active { ACCENT } else if hov { WHITE } else { GRAY };
-            g.text(&label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
+            g.text(&w.icon, &g.f.icon_xs, row1_x + 5.0, cur_y, 14.0, chip_h, txt_col, 0.95);
+            g.text(&label, &g.f.tiny, row1_x + 20.0, cur_y, cw - 24.0, chip_h, txt_col, 1.0);
             self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(FilterMode::Workspace(k)));
             row1_x += cw + 6.0;
         }
@@ -366,15 +367,16 @@ impl App {
 
         // Botón 1-Click Git Clone desde Portapapeles (alineado a la derecha de la Fila 1)
         if let Some((repo_name, _)) = &self.clipboard_repo {
-            let clone_lbl = format!("📥 Clonar {repo_name}");
+            let clone_lbl = format!("Clonar {repo_name}");
             let max_clone_w = (lx + tw - 16.0 - row1_x).max(0.0);
             if max_clone_w >= 110.0 {
-                let cw = (g.measure(&clone_lbl, &g.f.tiny) + 18.0).min(max_clone_w);
+                let cw = (g.measure(&clone_lbl, &g.f.tiny) + 29.0).min(max_clone_w);
                 let cx_btn = lx + tw - 16.0 - cw;
                 let hov = self.hov(Hit::CloneClipboardRepo);
                 g.rrect(cx_btn, cur_y, cw, chip_h, 7.0, GREEN, if hov { 0.25 } else { 0.14 });
                 g.rrect_stroke(cx_btn + 0.5, cur_y + 0.5, cw - 1.0, chip_h - 1.0, 7.0, GREEN, 0.65, 1.0);
-                g.text(&clone_lbl, &g.f.tiny_c, cx_btn + 4.0, cur_y, cw - 8.0, chip_h, GREEN, 1.0);
+                g.text(G_DOWNLOAD, &g.f.icon_xs, cx_btn + 5.0, cur_y, 14.0, chip_h, GREEN, 1.0);
+                g.text(&clone_lbl, &g.f.tiny, cx_btn + 20.0, cur_y, cw - 24.0, chip_h, GREEN, 1.0);
                 self.hit(cx_btn, cur_y, cw, chip_h, Hit::CloneClipboardRepo);
             }
         }
@@ -386,38 +388,37 @@ impl App {
         let pinned_total = self.cfg.projects.iter().filter(|p| p.pinned).count();
         let fs_total = self.fullstack_map.values().filter(|f| f.is_fullstack()).count();
 
-        let status_chips: &[(FilterMode, String, u32, bool)] = &[
+        let status_chips: &[(FilterMode, String, u32, Option<&str>)] = &[
             (
                 FilterMode::Pinned,
-                format!("📌 Fijados ({pinned_total})"),
+                format!("Fijados ({pinned_total})"),
                 WHITE,
-                false,
+                Some(G_PIN),
             ),
             (
                 FilterMode::GitDirty,
                 format!("Cambios Git ({dirty_total})"),
                 if dirty_total > 0 { AMBER } else { GRAY },
-                true,
+                None,
             ),
             (
                 FilterMode::RunningServer,
-                format!("⚡ Con Servidor ({srv_count})"),
+                format!("Con Servidor ({srv_count})"),
                 if srv_count > 0 { GREEN } else { GRAY },
-                false,
+                Some(G_BOLT),
             ),
             (
                 FilterMode::FullStack,
-                format!("🔗 Full-Stack ({fs_total})"),
+                format!("Full-Stack ({fs_total})"),
                 CYAN,
-                false,
+                Some(G_LINK),
             ),
         ];
 
-        for (mode, label, accent_col, has_git_icon) in status_chips {
+        for (mode, label, accent_col, glyph_opt) in status_chips {
             let active = self.filter_mode == *mode;
             let hov = self.hov(Hit::FilterChip(*mode));
-            let extra_icon_w = if *has_git_icon { 15.0 } else { 0.0 };
-            let cw = g.measure(label, &g.f.tiny) + 18.0 + extra_icon_w;
+            let cw = g.measure(label, &g.f.tiny) + 33.0;
             g.rrect(
                 row2_x,
                 cur_y,
@@ -450,21 +451,21 @@ impl App {
             } else {
                 GRAY
             };
-            if *has_git_icon {
-                g.draw_git_branch_icon(row2_x + 7.0, cur_y + 4.5, 13.0, txt_col, 0.95);
-                g.text(
-                    label,
-                    &g.f.tiny,
-                    row2_x + 22.0,
-                    cur_y,
-                    cw - 26.0,
-                    chip_h,
-                    txt_col,
-                    1.0,
-                );
+            if let Some(glyph) = glyph_opt {
+                g.text(glyph, &g.f.icon_xs, row2_x + 6.0, cur_y, 14.0, chip_h, txt_col, 0.95);
             } else {
-                g.text(label, &g.f.tiny_c, row2_x, cur_y, cw, chip_h, txt_col, 1.0);
+                g.draw_git_branch_icon(row2_x + 7.0, cur_y + 4.5, 13.0, txt_col, 0.95);
             }
+            g.text(
+                label,
+                &g.f.tiny,
+                row2_x + 22.0,
+                cur_y,
+                cw - 26.0,
+                chip_h,
+                txt_col,
+                1.0,
+            );
             self.hit(row2_x, cur_y, cw, chip_h, Hit::FilterChip(*mode));
             row2_x += cw + 6.0;
         }
@@ -651,13 +652,13 @@ impl App {
                             let both_on = f_srv.is_some() && b_srv.is_some();
 
                             // Botón Combo 2x
-                            rx -= 38.0;
+                            rx -= 34.0;
                             self.pill_action_btn(
                                 rx,
                                 btn_y,
-                                34.0,
+                                30.0,
                                 btn_h,
-                                "⚡2x",
+                                "2x",
                                 if both_on { GREEN } else { CYAN },
                                 both_on,
                                 Hit::ProjServerRole(i, ServerRole::Both),
@@ -842,16 +843,21 @@ impl App {
                 // Micro-badge de Grupo de Trabajo (Workspace)
                 if let Some(ws) = p.workspace.as_deref() {
                     let ws_item = self.cfg.workspaces.iter().find(|w| w.name.eq_ignore_ascii_case(ws) || w.id.eq_ignore_ascii_case(ws));
-                    let ws_lbl = if let Some(w) = ws_item {
-                        format!("{} {}", w.icon, w.name)
+                    if let Some(w) = ws_item {
+                        let wsw = (g.measure(&w.name, &g.f.tiny) + 23.0).min(115.0);
+                        if m_x + wsw < rx {
+                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
+                            g.text(&w.icon, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, WHITE, 0.9);
+                            g.text(&w.name, &g.f.tiny, m_x + 17.0, sub_y + 1.0, wsw - 20.0, 16.0, WHITE, 0.9);
+                            m_x += wsw + 6.0;
+                        }
                     } else {
-                        ws.to_string()
-                    };
-                    let wsw = (g.measure(&ws_lbl, &g.f.tiny) + 12.0).min(110.0);
-                    if m_x + wsw < rx {
-                        g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
-                        g.text(&ws_lbl, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, WHITE, 0.9);
-                        m_x += wsw + 6.0;
+                        let wsw = (g.measure(ws, &g.f.tiny) + 12.0).min(110.0);
+                        if m_x + wsw < rx {
+                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
+                            g.text(ws, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, WHITE, 0.9);
+                            m_x += wsw + 6.0;
+                        }
                     }
                 }
 
@@ -898,11 +904,11 @@ impl App {
                         let rem_w = (rx - m_x - 4.0).max(40.0);
                         let first_line = note.lines().next().unwrap_or(note);
                         let note_lbl = if note.contains('\n') || first_line.len() < note.len() {
-                            format!("📝 {first_line}…")
+                            format!("{first_line}…")
                         } else {
-                            format!("📝 {first_line}")
+                            first_line.to_string()
                         };
-                        let nw = (g.measure(&note_lbl, &g.f.tiny) + 14.0).min(rem_w);
+                        let nw = (g.measure(&note_lbl, &g.f.tiny) + 23.0).min(rem_w);
                         let note_hov = self.hov(Hit::ProjNote(i));
                         self.hit(m_x, sub_y + 1.0, nw, 16.0, Hit::ProjNote(i));
                         g.rrect(
@@ -914,7 +920,8 @@ impl App {
                             AMBER,
                             if note_hov { 0.28 } else { 0.13 },
                         );
-                        g.text(&note_lbl, &g.f.tiny, m_x + 5.0, sub_y + 1.0, nw - 8.0, 16.0, AMBER, 0.95);
+                        g.text(G_EDIT, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, AMBER, 0.95);
+                        g.text(&note_lbl, &g.f.tiny, m_x + 17.0, sub_y + 1.0, nw - 20.0, 16.0, AMBER, 0.95);
                     }
                 }
 
@@ -1408,7 +1415,7 @@ impl App {
             Hit::FilterChip(FilterMode::All) => Some("Mostrar todos los proyectos".into()),
             Hit::FilterChip(FilterMode::Workspace(k)) => {
                 if let Some(w) = self.cfg.workspaces.get(k) {
-                    Some(format!("Filtrar proyectos del grupo {} {}", w.icon, w.name))
+                    Some(format!("Filtrar proyectos del grupo \"{}\"", w.name))
                 } else {
                     Some("Filtrar por grupo de trabajo".into())
                 }
@@ -1416,7 +1423,7 @@ impl App {
             Hit::AddWorkspace => Some("Crear nuevo grupo de trabajo (+)".into()),
             Hit::EditWorkspace(k) => {
                 if let Some(w) = self.cfg.workspaces.get(k) {
-                    Some(format!("Editar grupo {} {}", w.icon, w.name))
+                    Some(format!("Editar grupo \"{}\"", w.name))
                 } else {
                     Some("Editar grupo de trabajo".into())
                 }

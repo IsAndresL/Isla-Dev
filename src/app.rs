@@ -59,11 +59,12 @@ pub(crate) const G_PLAY: &str = "\u{E768}";
 pub(crate) const G_STOP: &str = "\u{E71A}";
 pub(crate) const G_PIN: &str = "\u{E718}";
 pub(crate) const G_TRASH: &str = "\u{E74D}";
-pub(crate) const G_UPLOAD: &str = "\u{E898}";
 pub(crate) const G_DOWNLOAD: &str = "\u{E896}";
 pub(crate) const G_GLOBE: &str = "\u{E774}";
 pub(crate) const G_SYNC: &str = "\u{E895}";
 pub(crate) const G_LINK: &str = "\u{E71B}";
+pub(crate) const G_BOLT: &str = "\u{E945}";
+pub(crate) const G_WORK: &str = "\u{E821}";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FilterMode {
@@ -397,7 +398,7 @@ impl App {
             note_text: String::new(),
             ws_edit_idx: None,
             ws_name: String::new(),
-            ws_icon: String::from("💼"),
+            ws_icon: String::from(G_WORK),
             ed_tab: 0,
             ed_focus: 0,
             ed_tpl_idx: 0,
@@ -446,7 +447,18 @@ impl App {
 
     pub(crate) fn scan_and_sync(&mut self) {
         let scanned = actions::scan_base_dir(Path::new(&self.cfg.base_dir));
-        if self.cfg.sync_scanned_projects(scanned) {
+        let mut cfg_changed = self.cfg.sync_scanned_projects(scanned);
+        for p in &mut self.cfg.projects {
+            if p.last_opened == 0 {
+                let ts = actions::folder_modified_unix(Path::new(&p.path));
+                if ts > 0 {
+                    p.last_opened = ts;
+                    cfg_changed = true;
+                }
+            }
+        }
+        if cfg_changed {
+            self.cfg.sort_projects();
             self.save();
         }
         // Limpiar estados de proyectos que ya no existan
@@ -586,13 +598,6 @@ impl App {
 
     pub(crate) fn has_live_server(&self) -> bool {
         self.active_server_count() > 0
-    }
-
-    pub(crate) fn primary_live_port(&self) -> Option<u16> {
-        self.servers
-            .values()
-            .find_map(|s| s.port)
-            .or_else(|| self.active_ports.first().copied())
     }
 
     pub(crate) fn project_has_running_server(&self, proj_idx: usize) -> bool {
@@ -1333,7 +1338,7 @@ impl App {
             &format!("Clonando {repo_name}…"),
             "Descargando repositorio de GitHub…",
             GREEN,
-            "📥",
+            "✓",
         );
         self.s_deadline = None;
     }
@@ -1517,13 +1522,6 @@ impl App {
                     self.kick();
                 }
                 WorkMsg::ActivePorts(mut ports) => {
-                    for srv in self.servers.values() {
-                        if let Some(sp) = srv.port {
-                            if !ports.contains(&sp) && actions::is_port_open(sp) {
-                                ports.push(sp);
-                            }
-                        }
-                    }
                     ports.sort_unstable();
                     ports.dedup();
                     if self.active_ports != ports {
@@ -1820,7 +1818,8 @@ impl App {
                         is_err: false,
                         log_path: None,
                     });
-                    actions::scan_open_ports(Vec::new(), self.tx.clone(), self.hwnd.0 as isize);
+                    let extra_ports: Vec<u16> = self.servers.values().filter_map(|s| s.port).collect();
+                    actions::scan_open_ports(extra_ports, self.tx.clone(), self.hwnd.0 as isize);
                     self.kick();
                 } else {
                     actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
@@ -2074,7 +2073,7 @@ impl App {
             Hit::AddWorkspace => {
                 self.ws_edit_idx = None;
                 self.ws_name.clear();
-                self.ws_icon = "💼".into();
+                self.ws_icon = G_WORK.into();
                 self.set_view(View::WorkspaceModal);
             }
             Hit::EditWorkspace(idx) => {
@@ -2096,7 +2095,11 @@ impl App {
             Hit::WsSave => {
                 let name = self.ws_name.trim().to_string();
                 if !name.is_empty() {
-                    let icon = if self.ws_icon.trim().is_empty() { "📁".to_string() } else { self.ws_icon.clone() };
+                    let icon = if self.ws_icon.trim().is_empty() {
+                        G_FOLDER.to_string()
+                    } else {
+                        crate::config::normalize_ws_icon(&self.ws_icon)
+                    };
                     if let Some(idx) = self.ws_edit_idx {
                         if let Some(w) = self.cfg.workspaces.get_mut(idx) {
                             let old_name = w.name.clone();
@@ -2129,8 +2132,10 @@ impl App {
                             p.workspace = None;
                         }
                     }
-                    if self.filter_mode == FilterMode::Workspace(idx) {
-                        self.filter_mode = FilterMode::All;
+                    match self.filter_mode {
+                        FilterMode::Workspace(cur) if cur == idx => self.filter_mode = FilterMode::All,
+                        FilterMode::Workspace(cur) if cur > idx => self.filter_mode = FilterMode::Workspace(cur - 1),
+                        _ => {}
                     }
                     actions::play_ui_sound("delete", self.cfg.sounds_enabled);
                     self.save();
@@ -2252,7 +2257,7 @@ impl App {
                 menu,
                 MF_STRING,
                 210,
-                w!("📝 Editar nota / recordatorio rápido (Mini-TODO)"),
+                w!("Editar nota / recordatorio rápido (Mini-TODO)"),
             );
 
             if let Ok(ws_menu) = CreatePopupMenu() {
@@ -2260,8 +2265,7 @@ impl App {
                 for (k, w) in self.cfg.workspaces.iter().enumerate() {
                     let is_sel = cur_ws.eq_ignore_ascii_case(&w.name) || cur_ws.eq_ignore_ascii_case(&w.id);
                     let flags = if is_sel { MF_STRING | MF_CHECKED } else { MF_STRING };
-                    let lbl = format!("{} {}", w.icon, w.name);
-                    let _ = AppendMenuW(ws_menu, flags, 500 + k, &HSTRING::from(lbl));
+                    let _ = AppendMenuW(ws_menu, flags, 500 + k, &HSTRING::from(w.name.as_str()));
                 }
                 let _ = AppendMenuW(ws_menu, MF_SEPARATOR, 0, None);
                 let _ = AppendMenuW(ws_menu, MF_STRING, 598, w!("+ Crear nuevo grupo..."));
@@ -2270,39 +2274,39 @@ impl App {
                     ws_menu,
                     if is_none { MF_STRING | MF_CHECKED } else { MF_STRING },
                     599,
-                    w!("✖ Sin grupo"),
+                    w!("Sin grupo"),
                 );
-                let _ = AppendMenuW(menu, MF_POPUP, ws_menu.0 as usize, w!("🗂️ Asignar a Grupo de Trabajo"));
+                let _ = AppendMenuW(menu, MF_POPUP, ws_menu.0 as usize, w!("Asignar a Grupo de Trabajo"));
             }
             if p.linked_path.is_some() {
                 let _ = AppendMenuW(
                     menu,
                     MF_STRING,
                     212,
-                    w!("⛓️‍💥 Desvincular par Full-Stack (Front/Back)"),
+                    w!("Desvincular par Full-Stack (Front/Back)"),
                 );
             } else {
                 let _ = AppendMenuW(
                     menu,
                     MF_STRING,
                     211,
-                    w!("🔗 Vincular con otro proyecto (Par Front + Back)"),
+                    w!("Vincular con otro proyecto (Par Front + Back)"),
                 );
             }
 
             if let Some(fs) = &fs_info {
                 if fs.is_fullstack() {
                     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-                    let _ = AppendMenuW(menu, MF_STRING, 310, w!("▶ Iniciar/Detener solo Frontend"));
-                    let _ = AppendMenuW(menu, MF_STRING, 311, w!("▶ Iniciar/Detener solo Backend"));
-                    let _ = AppendMenuW(menu, MF_STRING, 312, w!("⚡ Iniciar/Detener Ambos (Combo Full-Stack)"));
+                    let _ = AppendMenuW(menu, MF_STRING, 310, w!("Iniciar / Detener solo Frontend"));
+                    let _ = AppendMenuW(menu, MF_STRING, 311, w!("Iniciar / Detener solo Backend"));
+                    let _ = AppendMenuW(menu, MF_STRING, 312, w!("Iniciar / Detener Ambos (Combo Full-Stack)"));
                 }
             }
 
             if is_srv_running {
                 let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-                let _ = AppendMenuW(menu, MF_STRING, 302, w!(">_ Ver terminal del servidor en vivo"));
-                let _ = AppendMenuW(menu, MF_STRING, 300, w!("■ Detener servidor local"));
+                let _ = AppendMenuW(menu, MF_STRING, 302, w!("Ver terminal del servidor en vivo"));
+                let _ = AppendMenuW(menu, MF_STRING, 300, w!("Detener servidor local"));
             }
 
             if !scripts.is_empty() {
@@ -2312,18 +2316,18 @@ impl App {
                         menu,
                         MF_STRING,
                         400 + idx,
-                        &HSTRING::from(format!("⚡ {pm} run {s_name}")),
+                        &HSTRING::from(format!("Ejecutar: {pm} run {s_name}")),
                     );
                 }
             }
 
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(menu, MF_STRING, 201, w!("📋 Quitar proyecto solo de la lista"));
+            let _ = AppendMenuW(menu, MF_STRING, 201, w!("Quitar proyecto solo de la lista"));
             let _ = AppendMenuW(
                 menu,
                 MF_STRING,
                 204,
-                w!("🗑 Eliminar proyecto por completo (borrar carpeta del disco)"),
+                w!("Eliminar proyecto por completo (borrar carpeta del disco)"),
             );
 
             let mut pt = POINT::default();
@@ -2364,7 +2368,7 @@ impl App {
             } else if cmd == 598 {
                 self.ws_edit_idx = None;
                 self.ws_name.clear();
-                self.ws_icon = "💼".into();
+                self.ws_icon = G_WORK.into();
                 self.set_view(View::WorkspaceModal);
             } else if cmd == 599 {
                 if let Some(proj) = self.cfg.projects.get_mut(i) {
@@ -2476,8 +2480,8 @@ impl App {
         let Some(w) = self.cfg.workspaces.get(k).cloned() else { return };
         unsafe {
             let Ok(menu) = CreatePopupMenu() else { return };
-            let _ = AppendMenuW(menu, MF_STRING, 1, &HSTRING::from(format!("✏️ Editar grupo \"{}\"", w.name)));
-            let _ = AppendMenuW(menu, MF_STRING, 2, &HSTRING::from(format!("🗑 Eliminar grupo \"{}\"", w.name)));
+            let _ = AppendMenuW(menu, MF_STRING, 1, &HSTRING::from(format!("Editar grupo \"{}\"", w.name)));
+            let _ = AppendMenuW(menu, MF_STRING, 2, &HSTRING::from(format!("Eliminar grupo \"{}\"", w.name)));
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
             self.focus();
@@ -2574,6 +2578,74 @@ impl App {
         }
     }
 
+    fn pop_word(s: &mut String) {
+        while s.chars().last().is_some_and(|c| c.is_whitespace()) {
+            s.pop();
+        }
+        while let Some(c) = s.chars().last() {
+            if c.is_whitespace() || matches!(c, '/' | '\\' | '-' | '_') {
+                break;
+            }
+            s.pop();
+        }
+        while s.chars().last().is_some_and(|c| matches!(c, '/' | '\\' | '-' | '_')) {
+            s.pop();
+        }
+    }
+
+    fn push_clipboard_clean(
+        dst: &mut String,
+        txt: &str,
+        max_chars: usize,
+        allow_newlines: bool,
+        sanitize_folder: bool,
+    ) -> bool {
+        let cur_len = dst.chars().count();
+        let rem = max_chars.saturating_sub(cur_len);
+        if rem == 0 {
+            return false;
+        }
+        let clean: String = if sanitize_folder {
+            txt.chars()
+                .filter(|c| !c.is_control() && !"\\/:*?\"<>|".contains(*c))
+                .map(|c| if c == ' ' { '-' } else { c })
+                .take(rem)
+                .collect()
+        } else if allow_newlines {
+            txt.chars()
+                .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+                .take(rem)
+                .collect()
+        } else {
+            txt.chars().filter(|c| !c.is_control()).take(rem).collect()
+        };
+        if clean.is_empty() {
+            return false;
+        }
+        dst.push_str(&clean);
+        true
+    }
+
+    fn selected_project_idx(&self) -> Option<usize> {
+        let filtered = self.filtered_projects();
+        filtered
+            .get(self.sel_idx.min(filtered.len().saturating_sub(1)))
+            .copied()
+    }
+
+    fn all_filter_modes(&self) -> Vec<FilterMode> {
+        let mut modes = Vec::with_capacity(5 + self.cfg.workspaces.len());
+        modes.push(FilterMode::All);
+        for k in 0..self.cfg.workspaces.len() {
+            modes.push(FilterMode::Workspace(k));
+        }
+        modes.push(FilterMode::Pinned);
+        modes.push(FilterMode::GitDirty);
+        modes.push(FilterMode::RunningServer);
+        modes.push(FilterMode::FullStack);
+        modes
+    }
+
     fn key(&mut self, vk: u32) -> Option<isize> {
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
         match vk {
@@ -2581,6 +2653,11 @@ impl App {
             x if x == VK_TAB.0 as u32 && self.view == View::CustomEditor => {
                 self.ed_focus = (self.ed_focus + 1) % 2;
                 self.kick();
+            }
+            x if x == VK_RETURN.0 as u32 && ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.toggle_project_server(proj_idx);
+                }
             }
             x if x == VK_RETURN.0 as u32 => match self.view {
                 View::Wizard => self.wizard_next(),
@@ -2599,47 +2676,25 @@ impl App {
                 }
                 View::CustomEditor => self.save_custom_editor_item(),
                 View::Expanded => {
-                    let filtered = self.filtered_projects();
-                    if let Some(&proj_idx) = filtered.get(self.sel_idx.min(filtered.len().saturating_sub(1))) {
+                    if let Some(proj_idx) = self.selected_project_idx() {
                         self.open_project(proj_idx, None);
                     }
                 }
                 _ => {}
             },
-            x if x == VK_RIGHT.0 as u32 && self.view == View::Expanded => {
-                let ws_len = self.cfg.workspaces.len();
-                if ws_len > 0 {
-                    self.filter_mode = match self.filter_mode {
-                        FilterMode::All => FilterMode::Workspace(0),
-                        FilterMode::Workspace(i) => {
-                            if i + 1 < ws_len {
-                                FilterMode::Workspace(i + 1)
-                            } else {
-                                FilterMode::All
-                            }
-                        }
-                        _ => FilterMode::All,
-                    };
-                    self.sel_idx = 0;
-                    self.scroll = 0;
-                    actions::play_ui_sound("tab", self.cfg.sounds_enabled);
-                    self.kick();
-                }
-            }
-            x if x == VK_LEFT.0 as u32 && self.view == View::Expanded => {
-                let ws_len = self.cfg.workspaces.len();
-                if ws_len > 0 {
-                    self.filter_mode = match self.filter_mode {
-                        FilterMode::All => FilterMode::Workspace(ws_len - 1),
-                        FilterMode::Workspace(0) => FilterMode::All,
-                        FilterMode::Workspace(i) => FilterMode::Workspace(i - 1),
-                        _ => FilterMode::All,
-                    };
-                    self.sel_idx = 0;
-                    self.scroll = 0;
-                    actions::play_ui_sound("tab", self.cfg.sounds_enabled);
-                    self.kick();
-                }
+            x if (x == VK_RIGHT.0 as u32 || x == VK_LEFT.0 as u32) && self.view == View::Expanded => {
+                let modes = self.all_filter_modes();
+                let pos = modes.iter().position(|&m| m == self.filter_mode).unwrap_or(0);
+                let next_pos = if x == VK_RIGHT.0 as u32 {
+                    (pos + 1) % modes.len()
+                } else {
+                    (pos + modes.len() - 1) % modes.len()
+                };
+                self.filter_mode = modes[next_pos];
+                self.sel_idx = 0;
+                self.scroll = 0;
+                actions::play_ui_sound("tab", self.cfg.sounds_enabled);
+                self.kick();
             }
             x if x == VK_DOWN.0 as u32 && self.view == View::Expanded => {
                 let len = self.filtered_projects().len();
@@ -2675,20 +2730,114 @@ impl App {
                     self.kick();
                 }
             }
+            x if x == VK_BACK.0 as u32 && ctrl => {
+                match self.view {
+                    View::Expanded => {
+                        Self::pop_word(&mut self.search);
+                        self.sel_idx = 0;
+                        self.scroll = 0;
+                        self.kick();
+                    }
+                    View::GitModal => {
+                        Self::pop_word(&mut self.git_commit_msg);
+                        self.kick();
+                    }
+                    View::NoteModal => {
+                        Self::pop_word(&mut self.note_text);
+                        self.kick();
+                    }
+                    View::WorkspaceModal => {
+                        Self::pop_word(&mut self.ws_name);
+                        self.kick();
+                    }
+                    View::CustomEditor => {
+                        let target = if self.ed_focus == 0 {
+                            &mut self.ed_f1
+                        } else {
+                            &mut self.ed_f2
+                        };
+                        Self::pop_word(target);
+                        self.ed_msg = None;
+                        self.kick();
+                    }
+                    View::Wizard if self.step == Step::Name => {
+                        Self::pop_word(&mut self.wiz_name);
+                        self.wiz_err = None;
+                        self.kick();
+                    }
+                    _ => return None,
+                }
+            }
             0x31..=0x39 if ctrl && self.view == View::Expanded => {
                 let filtered = self.filtered_projects();
                 if let Some(&proj_idx) = filtered.get((vk - 0x31) as usize) {
                     self.open_project(proj_idx, None);
                 }
             }
+            0x45 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.click(Hit::ProjExplorer(proj_idx));
+                }
+            }
+            0x47 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.click(Hit::ProjGit(proj_idx));
+                }
+            }
             0x4E if ctrl && self.view == View::Expanded => self.start_wizard(),
-            0x56 if ctrl && self.view == View::NoteModal => {
+            0x50 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.toggle_pin(proj_idx);
+                }
+            }
+            0x53 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.toggle_project_server(proj_idx);
+                }
+            }
+            0x54 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.click(Hit::ProjTerm(proj_idx));
+                }
+            }
+            0x56 if ctrl => {
                 if let Some(txt) = actions::read_clipboard_text(self.hwnd) {
-                    let cur_len = self.note_text.chars().count();
-                    let rem = 1000usize.saturating_sub(cur_len);
-                    let clean: String = txt.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').take(rem).collect();
-                    self.note_text.push_str(&clean);
-                    self.kick();
+                    let changed = match self.view {
+                        View::Expanded => {
+                            let ok = Self::push_clipboard_clean(&mut self.search, &txt, 120, false, false);
+                            if ok {
+                                self.sel_idx = 0;
+                                self.scroll = 0;
+                            }
+                            ok
+                        }
+                        View::GitModal => Self::push_clipboard_clean(&mut self.git_commit_msg, &txt, 80, false, false),
+                        View::NoteModal => Self::push_clipboard_clean(&mut self.note_text, &txt, 1000, true, false),
+                        View::WorkspaceModal => Self::push_clipboard_clean(&mut self.ws_name, &txt, 24, false, false),
+                        View::CustomEditor => {
+                            let target = if self.ed_focus == 0 {
+                                &mut self.ed_f1
+                            } else {
+                                &mut self.ed_f2
+                            };
+                            let ok = Self::push_clipboard_clean(target, &txt, 120, false, false);
+                            if ok {
+                                self.ed_msg = None;
+                            }
+                            ok
+                        }
+                        View::Wizard if self.step == Step::Name => {
+                            let ok = Self::push_clipboard_clean(&mut self.wiz_name, &txt, 60, false, true);
+                            if ok {
+                                self.wiz_err = None;
+                            }
+                            ok
+                        }
+                        _ => false,
+                    };
+                    if changed {
+                        self.kick();
+                    }
                 }
             }
             _ => return None,
@@ -2713,7 +2862,7 @@ impl App {
                 13 | 27 | 9 => return Some(0),
                 _ => {
                     let Some(ch) = char::from_u32(c) else { return Some(0) };
-                    if !ch.is_control() && self.search.chars().count() < 46 {
+                    if !ch.is_control() && self.search.chars().count() < 120 {
                         self.search.push(ch);
                         self.sel_idx = 0;
                         self.scroll = 0;
@@ -2786,7 +2935,7 @@ impl App {
                     13 | 27 | 9 => return Some(0),
                     _ => {
                         let Some(ch) = char::from_u32(c) else { return Some(0) };
-                        if !ch.is_control() && target.chars().count() < 95 {
+                        if !ch.is_control() && target.chars().count() < 120 {
                             target.push(ch);
                             self.ed_msg = None;
                             self.kick();
@@ -2930,9 +3079,7 @@ impl App {
                         Some(Hit::FilterChip(FilterMode::Workspace(k))) | Some(Hit::EditWorkspace(k)) => {
                             self.workspace_menu(k);
                         }
-                        Some(Hit::PortBadge(port)) => {
-                            actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
-                        }
+                        Some(Hit::PortBadge(port)) => self.click(Hit::KillPort(port)),
                         Some(Hit::Pill) => self.tray_menu(),
                         _ => {}
                     }
