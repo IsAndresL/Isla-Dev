@@ -1813,8 +1813,18 @@ impl App {
                 if let Some((k, pid)) = matched_pid {
                     self.servers.remove(&k);
                     actions::stop_dev_server(pid);
+                    self.active_ports.retain(|&p| p != port);
+                    let _ = self.tx.send(WorkMsg::Toast {
+                        title: format!("Puerto :{port} liberado"),
+                        sub: "Servidor detenido correctamente".into(),
+                        is_err: false,
+                        log_path: None,
+                    });
+                    actions::scan_open_ports(Vec::new(), self.tx.clone(), self.hwnd.0 as isize);
+                    self.kick();
+                } else {
+                    actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
                 }
-                actions::kill_port(port, self.tx.clone(), self.hwnd.0 as isize);
             }
             Hit::Project(i) => self.open_project(i, None),
             Hit::ProjServer(i) => self.toggle_project_server(i),
