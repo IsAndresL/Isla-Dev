@@ -124,8 +124,15 @@ pub enum WorkMsg {
         message: String,
         log_path: PathBuf,
     },
+    RunnerTaskStarted {
+        title: String,
+        short_label: String,
+        pid: u32,
+        log_path: PathBuf,
+    },
     RunnerTaskDone {
         title: String,
+        pid: u32,
         ok: bool,
         message: String,
         log_path: PathBuf,
@@ -2928,14 +2935,25 @@ fn run_cmd_streaming_to_log(
     cwd: &Path,
     shared: &Arc<Mutex<File>>,
 ) -> std::result::Result<bool, String> {
+    run_cmd_streaming_to_log_with_pid(cmd_str, cwd, shared, |_| {})
+}
+
+fn run_cmd_streaming_to_log_with_pid<F: FnOnce(u32)>(
+    cmd_str: &str,
+    cwd: &Path,
+    shared: &Arc<Mutex<File>>,
+    on_pid: F,
+) -> std::result::Result<bool, String> {
     let mut cmd = Command::new("cmd");
     cmd.args(["/C", cmd_str])
         .current_dir(cwd)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW);
 
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    on_pid(child.id());
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let h1 = stdout.map(|out| {
@@ -3114,6 +3132,36 @@ pub fn detect_project_runner_items(proj_path: &Path) -> Vec<RunnerItem> {
             format!("[{rel}] ")
         };
 
+        // 0. Ejecutables Windows (.bat / .cmd) en la raiz o subcarpetas candidatas
+        if let Ok(entries) = fs::read_dir(&dir) {
+            let mut batch_files: Vec<(String, String)> = entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if !p.is_file() {
+                        return None;
+                    }
+                    let ext = p.extension().and_then(|s| s.to_str())?.to_ascii_lowercase();
+                    if ext == "bat" || ext == "cmd" {
+                        let fname = e.file_name().to_string_lossy().to_string();
+                        Some((fname, ext))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            batch_files.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));
+            for (fname, ext) in batch_files {
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}{fname}"),
+                    subtitle: format!("Ejecutable Windows (.{ext})"),
+                    command: format!("\"{fname}\""),
+                    cwd: dir.clone(),
+                    category: "Batch".into(),
+                });
+            }
+        }
+
         // 1. Scripts de package.json
         if dir.join("package.json").is_file() {
             let pm = detect_package_manager(&dir);
@@ -3253,7 +3301,10 @@ pub fn run_runner_item_logged(
     tx: Sender<WorkMsg>,
     hwnd: isize,
 ) -> PathBuf {
-    let log_path = config::logs_dir().join(format!("runner-{}.log", safe_slug(proj_name)));
+    let log_path = config::logs_dir().join(format!(
+        "runner-{}.log",
+        safe_slug(&format!("{proj_name}-{}", item.label))
+    ));
     let label = item.label.clone();
     let cmd_str = item.command.clone();
     let cwd = item.cwd.clone();
@@ -3272,6 +3323,7 @@ pub fn run_runner_item_logged(
         let Ok(file) = file else {
             let _ = tx.send(WorkMsg::RunnerTaskDone {
                 title,
+                pid: 0,
                 ok: false,
                 message: "No se pudo abrir archivo de log".into(),
                 log_path: lp,
@@ -3280,8 +3332,20 @@ pub fn run_runner_item_logged(
             return;
         };
         let shared = Arc::new(Mutex::new(file));
+        let mut spawned_pid = 0u32;
 
-        match run_cmd_streaming_to_log(&cmd_str, &cwd, &shared) {
+        let res = run_cmd_streaming_to_log_with_pid(&cmd_str, &cwd, &shared, |pid| {
+            spawned_pid = pid;
+            let _ = tx.send(WorkMsg::RunnerTaskStarted {
+                title: title.clone(),
+                short_label: label.clone(),
+                pid,
+                log_path: lp.clone(),
+            });
+            notify_hwnd(hwnd);
+        });
+
+        match res {
             Ok(ok) => {
                 append_line_shared(
                     &shared,
@@ -3293,6 +3357,7 @@ pub fn run_runner_item_logged(
                 );
                 let _ = tx.send(WorkMsg::RunnerTaskDone {
                     title,
+                    pid: spawned_pid,
                     ok,
                     message: if ok {
                         "Ejecucion completada".into()
@@ -3307,6 +3372,7 @@ pub fn run_runner_item_logged(
                 append_line_shared(&shared, &format!("ERROR al iniciar comando: {e}"));
                 let _ = tx.send(WorkMsg::RunnerTaskDone {
                     title,
+                    pid: spawned_pid,
                     ok: false,
                     message: e,
                     log_path: lp,

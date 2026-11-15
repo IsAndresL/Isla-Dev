@@ -195,11 +195,22 @@ pub enum Hit {
     ConsoleCopyAll,
     ConsoleClear,
     ConsoleRestartServer,
+    ConsoleStopTask,
     ConsoleOpenExternal,
-    // Quick Runner Modal
+    // Quick Runner Modal & Active Tasks
     RunnerExec(usize),
     RunnerOpenEnv,
     RunnerRestoreDeps,
+    TaskLog(usize),
+    KillTask(usize),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveTask {
+    pub(crate) title: String,
+    pub(crate) short_label: String,
+    pub(crate) pid: u32,
+    pub(crate) log_path: PathBuf,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -376,6 +387,7 @@ pub struct App {
     pub(crate) run_items: Vec<RunnerItem>,
     pub(crate) run_scroll: usize,
     pub(crate) last_task_log: Option<(String, PathBuf)>,
+    pub(crate) active_tasks: Vec<ActiveTask>,
     // estado / notificaciones
     pub(crate) skind: SKind,
     pub(crate) s_title: String,
@@ -504,6 +516,7 @@ impl App {
             run_items: Vec::new(),
             run_scroll: 0,
             last_task_log: None,
+            active_tasks: Vec::new(),
             skind: SKind::Done,
             s_title: String::new(),
             s_sub: String::new(),
@@ -890,6 +903,9 @@ impl App {
         for srv in self.servers.values() {
             actions::stop_dev_server(srv.pid);
         }
+        for task in &self.active_tasks {
+            actions::stop_dev_server(task.pid);
+        }
         unsafe {
             let _ = KillTimer(self.hwnd, TIMER_POLL);
             let _ = KillTimer(self.hwnd, TIMER_TOPMOST);
@@ -967,7 +983,7 @@ impl App {
             View::Expanded => {
                 let filtered_len = self.filtered_projects().len();
                 let n = filtered_len.clamp(3, MAX_ROWS) as f32;
-                let ports_bar = if self.active_ports.is_empty() { 0.0 } else { 32.0 };
+                let ports_bar = if self.active_ports.is_empty() && self.active_tasks.is_empty() { 0.0 } else { 32.0 };
                 let search_bar = 42.0;
                 let chips_bar = 56.0;
                 (808.0, 64.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
@@ -1771,12 +1787,33 @@ impl App {
                         self.error(&format!("Error al restaurar {project_name}"), &message, Some(log_path));
                     }
                 }
+                WorkMsg::RunnerTaskStarted {
+                    title,
+                    short_label,
+                    pid,
+                    log_path,
+                } => {
+                    self.active_tasks.retain(|t| t.pid != pid);
+                    self.active_tasks.push(ActiveTask {
+                        title,
+                        short_label,
+                        pid,
+                        log_path,
+                    });
+                    self.kick();
+                }
                 WorkMsg::RunnerTaskDone {
                     title,
+                    pid,
                     ok,
                     message,
                     log_path,
                 } => {
+                    if pid > 0 {
+                        self.active_tasks.retain(|t| t.pid != pid);
+                    } else {
+                        self.active_tasks.retain(|t| t.log_path != log_path);
+                    }
                     self.last_task_log = Some((title.clone(), log_path.clone()));
                     if self.view == View::ConsoleModal {
                         self.refresh_console_lines();
@@ -1784,6 +1821,8 @@ impl App {
                         self.kick();
                     } else if !ok {
                         self.error(&format!("Fallo en {title}"), &message, Some(log_path));
+                    } else {
+                        self.kick();
                     }
                 }
             }
@@ -1847,6 +1886,11 @@ impl App {
             };
             if !sources.iter().any(|s| s.1 == srv.log_path) {
                 sources.push((lbl, srv.log_path.clone(), Some(cwd.clone())));
+            }
+        }
+        for task in &self.active_tasks {
+            if !sources.iter().any(|s| s.1 == task.log_path) {
+                sources.push((task.title.clone(), task.log_path.clone(), None));
             }
         }
         if let Some((lbl, lp)) = &self.last_task_log {
@@ -2798,6 +2842,40 @@ impl App {
                     let proj_p = cwd_opt.as_deref().map(Path::new);
                     actions::open_log_in_terminal(&lbl, proj_p, &lp);
                     self.minimize_preserving_state();
+                }
+            }
+            Hit::ConsoleStopTask => {
+                if let Some((_, lp, _)) = self.con_sources.get(self.con_source_idx).cloned() {
+                    if let Some(pos) = self.active_tasks.iter().position(|t| t.log_path == lp) {
+                        let task = self.active_tasks.remove(pos);
+                        actions::stop_dev_server(task.pid);
+                        self.con_msg = Some((format!("{} detenido", task.short_label), false));
+                        actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                        self.kick();
+                    }
+                }
+            }
+            Hit::TaskLog(idx) => {
+                if let Some(task) = self.active_tasks.get(idx).cloned() {
+                    self.open_console_modal(Some((task.title, task.log_path, None)));
+                }
+            }
+            Hit::KillTask(idx) => {
+                if idx < self.active_tasks.len() {
+                    let task = self.active_tasks.remove(idx);
+                    actions::stop_dev_server(task.pid);
+                    actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                    if self.view == View::ConsoleModal {
+                        self.con_msg = Some((format!("{} detenido", task.short_label), false));
+                    } else {
+                        let _ = self.tx.send(WorkMsg::Toast {
+                            title: format!("{} detenido", task.short_label),
+                            sub: "Proceso finalizado correctamente".into(),
+                            is_err: false,
+                            log_path: None,
+                        });
+                    }
+                    self.kick();
                 }
             }
             // Quick Runner Modal

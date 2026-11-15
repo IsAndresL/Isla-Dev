@@ -1456,11 +1456,17 @@ impl App {
 
         ry += 34.0;
         let has_srv = active_src.and_then(|s| s.2.as_ref()).is_some();
+        let has_task = !has_srv
+            && active_src
+                .map(|s| self.active_tasks.iter().any(|t| t.log_path == s.1))
+                .unwrap_or(false);
         self.pill_action_btn(lx, ry, 152.0, 28.0, "Copiar ultimo error", RED, !self.con_lines.is_empty(), Hit::ConsoleCopyLastError);
         self.pill_action_btn(lx + 160.0, ry, 102.0, 28.0, "Copiar todo", CYAN, !self.con_lines.is_empty(), Hit::ConsoleCopyAll);
         self.pill_action_btn(lx + 270.0, ry, 84.0, 28.0, "Limpiar", AMBER, active_src.is_some(), Hit::ConsoleClear);
         if has_srv {
             self.pill_action_btn(lx + 362.0, ry, 144.0, 28.0, "Reiniciar servidor", GREEN, true, Hit::ConsoleRestartServer);
+        } else if has_task {
+            self.pill_action_btn(lx + 362.0, ry, 136.0, 28.0, "Detener proceso", RED, true, Hit::ConsoleStopTask);
         }
         self.pill_action_btn(lx + tw - 134.0, ry, 134.0, 28.0, "Terminal externa", GRAY, active_src.is_some(), Hit::ConsoleOpenExternal);
 
@@ -1541,7 +1547,7 @@ impl App {
                 self.row_bg(lx, row_y, row_w, 42.0, Hit::RunnerExec(i), false);
 
                 let cat_l = item.category.to_lowercase();
-                let badge_col = if cat_l.contains("prisma") {
+                let badge_col = if cat_l.contains("batch") || cat_l.contains("prisma") {
                     ACCENT
                 } else if cat_l.contains("cargo") || cat_l.contains("rust") {
                     AMBER
@@ -1557,7 +1563,12 @@ impl App {
                 let sub = if item.subtitle.is_empty() { &item.command } else { &item.subtitle };
                 g.text(sub, &g.f.tiny, lx + 90.0, row_y + 22.0, row_w - 138.0, 15.0, DIM, 1.0);
 
-                g.text(G_PLAY, &g.f.icon_sm, lx + row_w - 34.0, row_y + 13.0, 20.0, 16.0, if hov { GREEN } else { GRAY }, 1.0);
+                let expected_title = format!("{proj_name} · {}", item.label);
+                if let Some(t_idx) = self.active_tasks.iter().position(|t| t.title == expected_title) {
+                    self.mini_action_btn(lx + row_w - 36.0, row_y + 8.0, 26.0, G_STOP, RED, true, Hit::KillTask(t_idx));
+                } else {
+                    g.text(G_PLAY, &g.f.icon_sm, lx + row_w - 34.0, row_y + 13.0, 20.0, 16.0, if hov { GREEN } else { GRAY }, 1.0);
+                }
             }
             self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.run_items.len());
         }

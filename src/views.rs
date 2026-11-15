@@ -152,50 +152,90 @@ impl App {
         let mut cur_y = y + 62.0;
 
         // 1. Barra de Puertos Locales Activos
-        if !self.active_ports.is_empty() {
-            g.circle(lx + 24.0, cur_y + 12.0, 3.8, GREEN, 1.0);
-            g.text("PUERTOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, GRAY, 1.0);
+        if !self.active_ports.is_empty() || !self.active_tasks.is_empty() {
             let mut px = lx + 96.0;
-            for &port in self.active_ports.iter().take(7) {
-                let label = format!(":{port}");
-                let pw = 88.0;
+            if !self.active_ports.is_empty() {
+                g.circle(lx + 24.0, cur_y + 12.0, 3.8, GREEN, 1.0);
+                g.text("PUERTOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, GRAY, 1.0);
+                for &port in self.active_ports.iter().take(7) {
+                    let label = format!(":{port}");
+                    let pw = 88.0;
+                    let bh = 22.0;
+                    let hov_open = self.hov(Hit::PortBadge(port));
+                    let hov_term = self.hov(Hit::PortTerm(port));
+                    let hov_kill = self.hov(Hit::KillPort(port));
+                    g.rrect(
+                        px,
+                        cur_y + 1.0,
+                        pw,
+                        bh,
+                        7.0,
+                        GREEN,
+                        if hov_open || hov_term { 0.22 } else { 0.12 },
+                    );
+                    g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, GREEN, 0.45, 1.0);
+                    g.text(&label, &g.f.badge, px + 7.0, cur_y + 1.0, 42.0, bh, GREEN, 1.0);
+                    self.hit(px, cur_y + 1.0, 45.0, bh, Hit::PortBadge(port));
+
+                    g.rrect(
+                        px + 46.0,
+                        cur_y + 3.0,
+                        18.0,
+                        18.0,
+                        4.0,
+                        WHITE,
+                        if hov_term { 0.18 } else { 0.0 },
+                    );
+                    g.text(
+                        G_TERM,
+                        &g.f.icon_sm,
+                        px + 46.0,
+                        cur_y + 1.0,
+                        18.0,
+                        bh,
+                        if hov_term { WHITE } else { GREEN },
+                        0.95,
+                    );
+                    self.hit(px + 46.0, cur_y + 1.0, 18.0, bh, Hit::PortTerm(port));
+
+                    g.text(
+                        G_CLOSE,
+                        &g.f.icon_sm,
+                        px + pw - 21.0,
+                        cur_y + 1.0,
+                        19.0,
+                        bh,
+                        if hov_kill { RED } else { GRAY },
+                        0.9,
+                    );
+                    self.hit(px + pw - 21.0, cur_y + 1.0, 20.0, bh, Hit::KillPort(port));
+                    px += pw + 6.0;
+                }
+            } else {
+                g.circle(lx + 24.0, cur_y + 12.0, 3.8, CYAN, 1.0);
+                g.text("ACTIVOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, GRAY, 1.0);
+            }
+
+            for (ti, task) in self.active_tasks.iter().enumerate() {
+                let pw = (g.measure(&task.short_label, &g.f.tiny) + 38.0).clamp(86.0, 146.0);
+                if px + pw > lx + tw - 16.0 {
+                    break;
+                }
                 let bh = 22.0;
-                let hov_open = self.hov(Hit::PortBadge(port));
-                let hov_term = self.hov(Hit::PortTerm(port));
-                let hov_kill = self.hov(Hit::KillPort(port));
+                let hov_log = self.hov(Hit::TaskLog(ti));
+                let hov_kill = self.hov(Hit::KillTask(ti));
                 g.rrect(
                     px,
                     cur_y + 1.0,
                     pw,
                     bh,
                     7.0,
-                    GREEN,
-                    if hov_open || hov_term { 0.22 } else { 0.12 },
+                    CYAN,
+                    if hov_log { 0.24 } else { 0.12 },
                 );
-                g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, GREEN, 0.45, 1.0);
-                g.text(&label, &g.f.badge, px + 7.0, cur_y + 1.0, 42.0, bh, GREEN, 1.0);
-                self.hit(px, cur_y + 1.0, 45.0, bh, Hit::PortBadge(port));
-
-                g.rrect(
-                    px + 46.0,
-                    cur_y + 3.0,
-                    18.0,
-                    18.0,
-                    4.0,
-                    WHITE,
-                    if hov_term { 0.18 } else { 0.0 },
-                );
-                g.text(
-                    G_TERM,
-                    &g.f.icon_sm,
-                    px + 46.0,
-                    cur_y + 1.0,
-                    18.0,
-                    bh,
-                    if hov_term { WHITE } else { GREEN },
-                    0.95,
-                );
-                self.hit(px + 46.0, cur_y + 1.0, 18.0, bh, Hit::PortTerm(port));
+                g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, CYAN, 0.45, 1.0);
+                g.text(&task.short_label, &g.f.tiny, px + 8.0, cur_y + 1.0, pw - 30.0, bh, CYAN, 1.0);
+                self.hit(px, cur_y + 1.0, pw - 22.0, bh, Hit::TaskLog(ti));
 
                 g.text(
                     G_CLOSE,
@@ -207,7 +247,7 @@ impl App {
                     if hov_kill { RED } else { GRAY },
                     0.9,
                 );
-                self.hit(px + pw - 21.0, cur_y + 1.0, 20.0, bh, Hit::KillPort(port));
+                self.hit(px + pw - 21.0, cur_y + 1.0, 20.0, bh, Hit::KillTask(ti));
                 px += pw + 6.0;
             }
             cur_y += 32.0;
@@ -584,7 +624,7 @@ impl App {
                         btn_y,
                         26.0,
                         G_EDIT,
-                        if p.note.is_some() { AMBER } else { GRAY },
+                        if p.note.is_some() { CYAN } else { GRAY },
                         p.note.is_some(),
                         Hit::ProjNote(i),
                     );
@@ -939,11 +979,11 @@ impl App {
                             nw,
                             16.0,
                             5.0,
-                            AMBER,
+                            CYAN,
                             if note_hov { 0.28 } else { 0.13 },
                         );
-                        g.text(G_EDIT, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, AMBER, 0.95);
-                        g.text(&note_lbl, &g.f.tiny, m_x + 17.0, sub_y + 1.0, nw - 20.0, 16.0, AMBER, 0.95);
+                        g.text(G_EDIT, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, CYAN, 0.95);
+                        g.text(&note_lbl, &g.f.tiny, m_x + 17.0, sub_y + 1.0, nw - 20.0, 16.0, CYAN, 0.95);
                     }
                 }
 
@@ -1146,6 +1186,7 @@ impl App {
         );
 
         let has_srvs = !self.servers.is_empty();
+        let has_live = has_srvs || !self.active_tasks.is_empty();
         g.circle(
             right_x + 14.0,
             bot_card_y + 16.0,
@@ -1153,8 +1194,8 @@ impl App {
             if has_srvs { GREEN } else { CYAN },
             1.0,
         );
-        let bot_hdr = if has_srvs {
-            format!("SERVIDORES EN VIVO ({})", self.servers.len())
+        let bot_hdr = if has_live {
+            format!("ACTIVOS EN VIVO ({})", self.servers.len() + self.active_tasks.len())
         } else {
             "ACCESOS RÁPIDOS".to_string()
         };
@@ -1199,6 +1240,25 @@ impl App {
                 self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, GREEN, false, Hit::PortTerm(pt));
                 self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, RED, false, Hit::KillPort(pt));
             }
+            by += 40.0;
+        }
+
+        // Mostrar scripts / .bat en ejecución en la tarjeta inferior derecha
+        for (ti, task) in self.active_tasks.iter().enumerate().take(2) {
+            if by + 38.0 > bot_limit_y {
+                break;
+            }
+            let sx = right_x + 7.0;
+            let sw = panel_w - 14.0;
+            let sh = 36.0;
+            g.rrect(sx, by, sw, sh, 9.0, BODY, 0.85);
+            g.rrect_stroke(sx + 0.5, by + 0.5, sw - 1.0, sh - 1.0, 9.0, CYAN, 0.40, 1.0);
+            g.circle(sx + 10.0, by + 18.0, 3.2, CYAN, 1.0);
+            g.text(&task.short_label, &g.f.badge, sx + 18.0, by + 2.0, sw - 74.0, 17.0, WHITE, 1.0);
+            g.text("Ejecutando en vivo…", &g.f.tiny, sx + 18.0, by + 18.0, sw - 74.0, 15.0, CYAN, 0.95);
+            self.hit(sx, by, sw - 48.0, sh, Hit::TaskLog(ti));
+            self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, CYAN, false, Hit::TaskLog(ti));
+            self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, RED, false, Hit::KillTask(ti));
             by += 40.0;
         }
 
@@ -1523,7 +1583,10 @@ impl App {
             Hit::ConsoleCopyAll => Some("Copiar todo el log visible al portapapeles".into()),
             Hit::ConsoleClear => Some("Limpiar líneas del archivo de log actual".into()),
             Hit::ConsoleRestartServer => Some("Reiniciar el servidor de desarrollo activo".into()),
+            Hit::ConsoleStopTask => Some("Detener el script o proceso .bat en ejecución".into()),
             Hit::ConsoleOpenExternal => Some("Abrir este log en ventana externa de Windows Terminal".into()),
+            Hit::TaskLog(_) => Some("Ver salida en vivo de este script / .bat en la Consola".into()),
+            Hit::KillTask(_) => Some("Detener este script / .bat en ejecución".into()),
             Hit::RunnerExec(_) => Some("Ejecutar comando y ver salida en vivo en la consola".into()),
             Hit::RunnerOpenEnv => Some("Gestionar .env de este proyecto".into()),
             Hit::RunnerRestoreDeps => Some("Este proyecto fue limpiado · Clic para reinstalar librerías".into()),
