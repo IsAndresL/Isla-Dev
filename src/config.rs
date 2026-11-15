@@ -25,6 +25,30 @@ pub struct Config {
     pub templates: Vec<Template>,
     #[serde(default)]
     pub projects: Vec<Project>,
+    #[serde(default)]
+    pub env_vault: Vec<EnvEntry>,
+    #[serde(default)]
+    pub clean_manifests: Vec<CleanManifest>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct EnvEntry {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CleanManifest {
+    pub project_path: String,
+    pub project_name: String,
+    pub cleaned_at: u64,
+    pub freed_bytes: u64,
+    #[serde(default)]
+    pub targets_removed: Vec<String>,
+    #[serde(default)]
+    pub libraries_summary: Vec<String>,
+    #[serde(default)]
+    pub restore_commands: Vec<String>,
 }
 
 fn d_hotkey() -> String {

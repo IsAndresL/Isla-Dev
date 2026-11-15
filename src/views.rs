@@ -79,6 +79,10 @@ impl App {
             View::NoteModal => self.draw_note_modal(lx, y, tw),
             View::WorkspaceModal => self.draw_workspace_modal(lx, y, tw),
             View::CustomEditor => self.draw_custom_editor(lx, y, tw),
+            View::EnvModal => self.draw_env_modal(lx, y, tw),
+            View::CleanerModal => self.draw_cleaner_modal(lx, y, tw),
+            View::ConsoleModal => self.draw_console_modal(lx, y, tw),
+            View::RunnerModal => self.draw_runner_modal(lx, y, tw),
             View::Status => self.draw_status(lx, y, tw, th),
         }
         if self.view != View::Compact {
@@ -552,47 +556,65 @@ impl App {
 
                 // Calcular espacio ocupado por botones a la derecha (Estilo Linear / Raycast: limpio en reposo, completo en hover)
                 let mut rx = row_x + row_w - 8.0;
-                let btn_y = ry + 10.0;
-                let btn_h = 28.0;
+                let btn_y = ry + 11.0;
+                let btn_h = 26.0;
 
                 if row_hov || is_sel {
-                    // --- FILA EN HOVER O SELECCIÓN POR TECLADO: Mostrar todos los controles interactivos con sus cajas ---
-                    rx -= 28.0;
+                    // --- FILA EN HOVER O SELECCIÓN POR TECLADO: Mostrar controles interactivos compactos ---
+                    rx -= 26.0;
                     self.mini_action_btn(
                         rx,
                         btn_y,
-                        28.0,
+                        26.0,
                         G_PIN,
                         if p.pinned { WHITE } else { GRAY },
                         p.pinned,
                         Hit::ProjPin(i),
                     );
 
-                    rx -= 31.0;
-                    self.mini_action_btn(rx, btn_y, 28.0, G_FOLDER, GRAY, false, Hit::ProjExplorer(i));
+                    rx -= 29.0;
+                    self.mini_action_btn(rx, btn_y, 26.0, G_FOLDER, GRAY, false, Hit::ProjExplorer(i));
 
-                    rx -= 31.0;
-                    self.mini_action_btn(rx, btn_y, 28.0, G_TERM, GRAY, false, Hit::ProjTerm(i));
+                    rx -= 29.0;
+                    self.mini_action_btn(rx, btn_y, 26.0, G_TERM, GRAY, false, Hit::ProjTerm(i));
 
-                    rx -= 31.0;
+                    rx -= 29.0;
                     self.mini_action_btn(
                         rx,
                         btn_y,
-                        28.0,
+                        26.0,
                         G_EDIT,
                         if p.note.is_some() { AMBER } else { GRAY },
                         p.note.is_some(),
                         Hit::ProjNote(i),
                     );
 
+                    let has_env = actions::read_project_env(std::path::Path::new(&p.path))
+                        .1
+                        .is_empty()
+                        == false;
+                    rx -= 29.0;
+                    self.mini_action_btn(
+                        rx,
+                        btn_y,
+                        26.0,
+                        G_KEY,
+                        if has_env { CYAN } else { GRAY },
+                        has_env,
+                        Hit::ProjEnv(i),
+                    );
+
+                    rx -= 29.0;
+                    self.mini_action_btn(rx, btn_y, 26.0, G_BOLT, WHITE, false, Hit::ProjRunner(i));
+
                     // Botón de Git con icono vectorial real de rama Git (nunca ▯)
                     let is_dirty = git_info.map(|g| g.dirty).unwrap_or(false);
-                    rx -= 32.0;
+                    rx -= 29.0;
                     let git_hov = self.hov(Hit::ProjGit(i));
                     g.rrect(
                         rx,
                         btn_y,
-                        28.0,
+                        26.0,
                         btn_h,
                         8.0,
                         if is_dirty { AMBER } else { WHITE },
@@ -607,7 +629,7 @@ impl App {
                     g.rrect_stroke(
                         rx + 0.5,
                         btn_y + 0.5,
-                        27.0,
+                        25.0,
                         btn_h - 1.0,
                         8.0,
                         if is_dirty {
@@ -621,9 +643,9 @@ impl App {
                         1.0,
                     );
                     g.draw_git_branch_icon(
-                        rx + 6.5,
-                        btn_y + 6.5,
-                        15.0,
+                        rx + 6.0,
+                        btn_y + 6.0,
+                        14.0,
                         if is_dirty {
                             AMBER
                         } else if git_hov {
@@ -634,9 +656,9 @@ impl App {
                         1.0,
                     );
                     if is_dirty {
-                        g.circle(rx + 23.0, btn_y + 5.0, 3.0, AMBER, 1.0);
+                        g.circle(rx + 21.0, btn_y + 5.0, 2.8, AMBER, 1.0);
                     }
-                    self.hit(rx, btn_y, 28.0, btn_h, Hit::ProjGit(i));
+                    self.hit(rx, btn_y, 26.0, btn_h, Hit::ProjGit(i));
 
                     // Controles de Servidor (Full-Stack F / B / 2x o Individual)
                     if is_fullstack {
@@ -1191,6 +1213,25 @@ impl App {
                 Hit::CloneClipboardRepo,
             ));
         }
+        let saved_recipes = self.cfg.clean_manifests.len();
+        quick_actions.push((
+            G_DISK,
+            "Limpiador de espacio".into(),
+            if saved_recipes > 0 {
+                format!("{saved_recipes} receta(s) lista(s) para restaurar")
+            } else {
+                "Libera GB guardando receta 1-clic".into()
+            },
+            AMBER,
+            Hit::OpenDiskCleaner,
+        ));
+        quick_actions.push((
+            G_TERM,
+            "Consola de logs en vivo".into(),
+            "Errores, servidores y copiar para IA".into(),
+            GREEN,
+            Hit::OpenLiveConsole,
+        ));
         quick_actions.push((
             G_FOLDER,
             "Abrir carpeta raíz".into(),
@@ -1457,11 +1498,35 @@ impl App {
             Hit::ProjServerRole(_, ServerRole::Front) => Some("Iniciar / Detener solo el Frontend".into()),
             Hit::ProjServerRole(_, ServerRole::Back) => Some("Iniciar / Detener solo el Backend".into()),
             Hit::ProjServerRole(_, ServerRole::Both) => Some("Combo Full-Stack: Iniciar / Detener Front y Back a la vez".into()),
-            Hit::ProjServerTerm(_) => Some("Ver terminal del servidor en vivo".into()),
+            Hit::ProjServerTerm(_) => Some("Abrir Consola Integrada del servidor en vivo".into()),
             Hit::ProjGit(_) => Some("Git y GitHub (Commit, Push, Pull)".into()),
             Hit::ProjNote(_) => Some("Nota / Recordatorio rápido del proyecto (Mini-TODO)".into()),
+            Hit::ProjRunner(_) => Some("Quick Runner: scripts, Prisma, Cargo y herramientas (Ctrl+R)".into()),
+            Hit::ProjEnv(_) => Some("Variables de entorno (.env, Bóveda y .env.example) (Ctrl+K)".into()),
             Hit::ProjTerm(_) => Some("Abrir en Windows Terminal / PowerShell".into()),
             Hit::ProjExplorer(_) => Some("Abrir carpeta en el Explorador de archivos".into()),
+            Hit::OpenDiskCleaner => Some("Limpiador inteligente de node_modules/target con receta 1-clic (Ctrl+D)".into()),
+            Hit::OpenLiveConsole => Some("Consola integrada en vivo con copiar último error (Ctrl+L)".into()),
+            Hit::EnvToggleMask => Some("Mostrar u ocultar valores secretos".into()),
+            Hit::EnvSyncExample => Some("Escribir .env.example sin valores secretos para Git".into()),
+            Hit::EnvCopyVal(_) => Some("Copiar valor al portapapeles".into()),
+            Hit::EnvEditVar(_) => Some("Cargar clave y valor arriba para editar".into()),
+            Hit::EnvSaveToVault(_) => Some("Guardar variable en tu Bóveda Personal reutilizable".into()),
+            Hit::EnvDeleteVar(_) => Some("Eliminar variable de este archivo .env".into()),
+            Hit::EnvVaultInject(_) => Some("Inyectar esta variable en el .env actual en 1 clic".into()),
+            Hit::EnvVaultDelete(_) => Some("Quitar de la Bóveda Personal".into()),
+            Hit::CleanerRescan => Some("Volver a analizar tamaño y librerías de todos los proyectos".into()),
+            Hit::CleanerCleanOne(_) => Some("Guardar receta exacta y liberar espacio de este proyecto".into()),
+            Hit::CleanerCleanAll => Some("Guardar recetas de todos y limpiar todo el espacio".into()),
+            Hit::CleanerRestore(_) => Some("Restaurar e instalar todas sus librerías en 1 clic".into()),
+            Hit::ConsoleCopyLastError => Some("Copiar último bloque de error para pegarlo en tu IA o IDE".into()),
+            Hit::ConsoleCopyAll => Some("Copiar todo el log visible al portapapeles".into()),
+            Hit::ConsoleClear => Some("Limpiar líneas del archivo de log actual".into()),
+            Hit::ConsoleRestartServer => Some("Reiniciar el servidor de desarrollo activo".into()),
+            Hit::ConsoleOpenExternal => Some("Abrir este log en ventana externa de Windows Terminal".into()),
+            Hit::RunnerExec(_) => Some("Ejecutar comando y ver salida en vivo en la consola".into()),
+            Hit::RunnerOpenEnv => Some("Gestionar .env de este proyecto".into()),
+            Hit::RunnerRestoreDeps => Some("Este proyecto fue limpiado · Clic para reinstalar librerías".into()),
             Hit::ProjPin(i) => {
                 let pinned = self.cfg.projects.get(i).map(|p| p.pinned).unwrap_or(false);
                 if pinned {

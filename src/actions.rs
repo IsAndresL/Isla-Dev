@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::os::windows::fs::MetadataExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -22,7 +23,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::config::{self, Launcher, Library, Project, Template};
+use crate::config::{self, CleanManifest, Launcher, Library, Project, Template};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub const WM_WORKER: u32 = 0x8000 + 1;
@@ -67,6 +68,25 @@ impl FullStackInfo {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ProjectDiskInfo {
+    pub project_name: String,
+    pub project_path: String,
+    pub cache_bytes: u64,
+    pub targets_found: Vec<String>,
+    pub libraries_detected: Vec<String>,
+    pub restore_commands: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RunnerItem {
+    pub label: String,
+    pub subtitle: String,
+    pub command: String,
+    pub cwd: PathBuf,
+    pub category: String,
+}
+
 pub enum WorkMsg {
     Progress(f32, String),
     Done {
@@ -91,6 +111,24 @@ pub enum WorkMsg {
         sub: String,
         is_err: bool,
         log_path: Option<PathBuf>,
+    },
+    DiskScanResult(Vec<ProjectDiskInfo>),
+    DiskCleanDone {
+        manifests: Vec<CleanManifest>,
+        message: String,
+    },
+    RestoreDone {
+        project_path: String,
+        project_name: String,
+        ok: bool,
+        message: String,
+        log_path: PathBuf,
+    },
+    RunnerTaskDone {
+        title: String,
+        ok: bool,
+        message: String,
+        log_path: PathBuf,
     },
 }
 
@@ -965,19 +1003,17 @@ pub fn detect_package_manager(path: &Path) -> &'static str {
     }
 }
 
-pub fn detect_package_scripts(path: &Path) -> Vec<(String, String)> {
-    let Ok(content) = fs::read_to_string(path.join("package.json")) else {
+pub fn read_json_object_pairs(content: &str, section_key: &str) -> Vec<(String, String)> {
+    let needle = format!("\"{section_key}\"");
+    let Some(idx) = content.find(&needle) else {
         return Vec::new();
     };
-    let Some(idx) = content.find("\"scripts\"") else {
-        return Vec::new();
-    };
-    let after = &content[idx + 9..];
+    let after = &content[idx + needle.len()..];
     let Some(open_brace) = after.find('{') else {
         return Vec::new();
     };
     let body = &after[open_brace + 1..];
-    let mut scripts = Vec::new();
+    let mut pairs = Vec::new();
     let mut chars = body.chars().peekable();
 
     let read_quoted = |chars: &mut std::iter::Peekable<std::str::Chars>| -> Option<String> {
@@ -1013,17 +1049,24 @@ pub fn detect_package_scripts(path: &Path) -> Vec<(String, String)> {
                 break;
             }
             if c == '}' {
-                return scripts;
+                return pairs;
             }
             chars.next();
         }
         if let Some(val) = read_quoted(&mut chars) {
-            scripts.push((key, val));
+            pairs.push((key, val));
         } else {
             break;
         }
     }
-    scripts
+    pairs
+}
+
+pub fn detect_package_scripts(path: &Path) -> Vec<(String, String)> {
+    let Ok(content) = fs::read_to_string(path.join("package.json")) else {
+        return Vec::new();
+    };
+    read_json_object_pairs(&content, "scripts")
 }
 
 pub fn detect_dev_command(path: &Path, stack: &str) -> Option<(String, u16)> {
@@ -1474,128 +1517,6 @@ pub fn start_dev_server(
     });
 
     Ok((pid, log_path))
-}
-
-/// Abre o enfoca la terminal en vivo del servidor mostrando el comando ejecutado (`npm run dev`, etc.) y toda su salida.
-pub fn show_server_terminal(
-    project_name: Option<&str>,
-    project_path: Option<&Path>,
-    port: Option<u16>,
-    log_path: Option<&Path>,
-) {
-    if let Some(lp) = log_path {
-        if lp.exists() {
-            let label = project_name.unwrap_or("Servidor");
-            open_log_in_terminal(label, project_path, lp);
-            return;
-        }
-    }
-    if let Some(name) = project_name {
-        let lp = server_log_path(name);
-        if lp.exists() {
-            open_log_in_terminal(name, project_path, &lp);
-            return;
-        }
-    }
-    if let Some(p) = port {
-        if focus_window_for_port(p) {
-            return;
-        }
-    }
-    if let Some(path) = project_path {
-        open_terminal_at(path);
-    }
-}
-
-fn focus_window_for_port(port: u16) -> bool {
-    let Ok(out) = Command::new("netstat")
-        .args(["-ano"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let needle = format!(":{port}");
-    let mut target_pid = 0u32;
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 && parts[1].ends_with(&needle) && parts[3].eq_ignore_ascii_case("LISTENING") {
-            if let Ok(pid) = parts[parts.len() - 1].parse::<u32>() {
-                if pid > 0 {
-                    target_pid = pid;
-                    break;
-                }
-            }
-        }
-    }
-    if target_pid == 0 {
-        return false;
-    }
-
-    let mut chain = vec![target_pid];
-    if let Ok(p_out) = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "$id={target_pid}; for($i=0;$i -lt 6;$i++){{ $p=(Get-CimInstance Win32_Process -Filter \"ProcessId=$id\" -ErrorAction SilentlyContinue).ParentProcessId; if(!$p){{break}}; Write-Output $p; $id=$p }}"
-            ),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    {
-        for line in String::from_utf8_lossy(&p_out.stdout).lines() {
-            if let Ok(ppid) = line.trim().parse::<u32>() {
-                if ppid > 0 {
-                    chain.push(ppid);
-                }
-            }
-        }
-    }
-
-    unsafe {
-        for &pid in &chain {
-            if let Some(hw) = find_window_by_pid(pid) {
-                let _ = ShowWindow(hw, SW_SHOW);
-                let _ = ShowWindow(hw, SW_RESTORE);
-                let _ = SetForegroundWindow(hw);
-                return true;
-            }
-        }
-    }
-    false
-}
-
-unsafe fn find_window_by_pid(target_pid: u32) -> Option<HWND> {
-    struct SearchCtx {
-        pid: u32,
-        found: Option<HWND>,
-    }
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let ctx = &mut *(lparam.0 as *mut SearchCtx);
-        let mut wnd_pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut wnd_pid));
-        if wnd_pid == ctx.pid {
-            let mut cls = [0u16; 64];
-            let len = GetClassNameW(hwnd, &mut cls);
-            let cname = String::from_utf16_lossy(&cls[..len as usize]);
-            if cname == "ConsoleWindowClass"
-                || cname == "CASCADIA_HOSTING_WINDOW_CLASS"
-                || IsWindowVisible(hwnd).as_bool()
-            {
-                ctx.found = Some(hwnd);
-                return BOOL(0);
-            }
-        }
-        BOOL(1)
-    }
-    let mut ctx = SearchCtx {
-        pid: target_pid,
-        found: None,
-    };
-    let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
-    ctx.found
 }
 
 /// Detiene el árbol completo del proceso de un servidor de desarrollo (`taskkill /F /T /PID`).
@@ -2400,4 +2321,1000 @@ pub fn read_clipboard_text(hwnd: HWND) -> Option<String> {
         let _ = CloseClipboard();
         text_opt
     }
+}
+
+pub fn write_clipboard_text(hwnd: HWND, text: &str) -> bool {
+    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let byte_len = utf16.len() * std::mem::size_of::<u16>();
+    unsafe {
+        if OpenClipboard(hwnd).is_err() {
+            return false;
+        }
+        let _ = EmptyClipboard();
+        let Ok(hmem) = GlobalAlloc(GMEM_MOVEABLE, byte_len) else {
+            let _ = CloseClipboard();
+            return false;
+        };
+        let ptr = GlobalLock(hmem) as *mut u16;
+        if ptr.is_null() {
+            let _ = GlobalFree(hmem);
+            let _ = CloseClipboard();
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+        let _ = GlobalUnlock(hmem);
+        let res = SetClipboardData(13u32, HANDLE(hmem.0));
+        if res.is_err() {
+            let _ = GlobalFree(hmem);
+        }
+        let _ = CloseClipboard();
+        res.is_ok()
+    }
+}
+
+// ============================================================================
+// 5. GESTOR DE VARIABLES DE ENTORNO (.env) Y .env.example
+// ============================================================================
+
+fn parse_env_line(line: &str) -> Option<(String, String)> {
+    let mut trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("export ") {
+        trimmed = rest.trim_start();
+    }
+    let eq = trimmed.find('=')?;
+    let key = trimmed[..eq].trim();
+    if key.is_empty() {
+        return None;
+    }
+    let mut val = trimmed[eq + 1..].trim();
+    if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+        || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+    {
+        val = &val[1..val.len() - 1];
+    }
+    Some((key.to_string(), val.to_string()))
+}
+
+fn format_env_value(val: &str) -> String {
+    if val.contains(' ') || val.contains('#') || val.contains('"') || val.contains('\t') {
+        format!("\"{}\"", val.replace('"', "\\\""))
+    } else {
+        val.to_string()
+    }
+}
+
+pub fn read_project_env(proj_path: &Path) -> (String, Vec<(String, String)>) {
+    let candidates = [".env", ".env.local", ".env.development"];
+    let active_file = candidates
+        .iter()
+        .find(|f| proj_path.join(f).is_file())
+        .copied()
+        .unwrap_or(".env");
+
+    let mut vars = Vec::new();
+    let full = proj_path.join(active_file);
+    if let Ok(bytes) = fs::read(&full) {
+        let text = String::from_utf8_lossy(&bytes);
+        for line in text.lines() {
+            if let Some((k, v)) = parse_env_line(line) {
+                if let Some(pos) = vars.iter().position(|(ek, _): &(String, String)| ek == &k) {
+                    vars[pos].1 = v;
+                } else {
+                    vars.push((k, v));
+                }
+            }
+        }
+    }
+    (active_file.to_string(), vars)
+}
+
+pub fn write_project_env(
+    proj_path: &Path,
+    filename: &str,
+    vars: &[(String, String)],
+) -> std::io::Result<()> {
+    let target = proj_path.join(filename);
+    let mut out_lines: Vec<String> = Vec::new();
+    let mut written_keys: Vec<String> = Vec::new();
+
+    if let Ok(bytes) = fs::read(&target) {
+        let existing = String::from_utf8_lossy(&bytes);
+        for raw in existing.lines() {
+            if let Some((k, _)) = parse_env_line(raw) {
+                if let Some((_, new_val)) = vars.iter().find(|(vk, _)| vk == &k) {
+                    if !written_keys.contains(&k) {
+                        out_lines.push(format!("{}={}", k, format_env_value(new_val)));
+                        written_keys.push(k);
+                    }
+                }
+                // Si no está en `vars`, fue eliminada por el usuario y se omite
+            } else {
+                out_lines.push(raw.to_string());
+            }
+        }
+    }
+
+    for (k, v) in vars {
+        if !written_keys.contains(k) {
+            out_lines.push(format!("{}={}", k, format_env_value(v)));
+            written_keys.push(k.clone());
+        }
+    }
+
+    let mut content = out_lines.join("\n");
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    fs::write(target, content)
+}
+
+pub fn sync_env_example(proj_path: &Path, vars: &[(String, String)]) -> std::io::Result<usize> {
+    let mut lines = vec![
+        "# Variables de entorno requeridas (sincronizado por Isla Dev)".to_string(),
+        "# Completa los valores sensibles localmente en tu archivo .env".to_string(),
+        String::new(),
+    ];
+    for (k, v) in vars {
+        let low = k.to_lowercase();
+        let is_safe_public = (low == "port" || low == "node_env" || low == "host")
+            && !v.contains('\n')
+            && v.len() <= 32;
+        if is_safe_public {
+            lines.push(format!("{k}={}", format_env_value(v)));
+        } else {
+            lines.push(format!("{k}="));
+        }
+    }
+    let mut content = lines.join("\n");
+    content.push('\n');
+    fs::write(proj_path.join(".env.example"), content)?;
+    Ok(vars.len())
+}
+
+// ============================================================================
+// 6. LIMPIADOR INTELIGENTE DE CACHÉS + RECETAS DE RESTAURACIÓN
+// ============================================================================
+
+const CLEAN_TARGETS: &[&str] = &[
+    "node_modules",
+    "target",
+    ".next",
+    "dist",
+    ".astro",
+    ".turbo",
+    ".venv",
+    "venv",
+    "__pycache__",
+];
+
+const SUBDIR_SCOPES: &[&str] = &[
+    "frontend",
+    "client",
+    "web",
+    "app",
+    "backend",
+    "server",
+    "api",
+];
+
+fn candidate_project_dirs(proj_path: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = vec![(String::new(), proj_path.to_path_buf())];
+    for sub in SUBDIR_SCOPES {
+        let p = proj_path.join(sub);
+        if p.is_dir() {
+            out.push((sub.to_string(), p));
+        }
+    }
+    out
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.2} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn dir_size_bytes(root: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(md) = fs::symlink_metadata(&path) else { continue };
+            // Saltar enlaces simbólicos / junctions de Windows (p.ej. en pnpm) para evitar bucles o conteo doble
+            if md.file_type().is_symlink() || (md.file_attributes() & 0x0400) != 0 {
+                continue;
+            }
+            if md.is_dir() {
+                stack.push(path);
+            } else {
+                total = total.saturating_add(md.len());
+            }
+        }
+    }
+    total
+}
+
+fn detect_cargo_deps(cargo_path: &Path) -> Vec<String> {
+    let Ok(bytes) = fs::read(cargo_path) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut deps = Vec::new();
+    let mut in_deps = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_deps = line == "[dependencies]" || line == "[dev-dependencies]";
+            continue;
+        }
+        if in_deps {
+            if let Some(eq) = line.find('=') {
+                let name = line[..eq].trim();
+                if !name.is_empty() {
+                    deps.push(name.to_string());
+                }
+            }
+        }
+    }
+    deps
+}
+
+fn detect_python_deps(dir: &Path, venv_name: Option<&str>) -> Vec<String> {
+    if let Some(vname) = venv_name {
+        let py = dir.join(vname).join("Scripts").join("python.exe");
+        if py.is_file() {
+            if let Ok(out) = Command::new(&py)
+                .args(["-m", "pip", "list", "--format=freeze"])
+                .current_dir(dir)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+            {
+                if out.status.success() {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let pkgs: Vec<String> = stdout
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty() && !l.starts_with("-e "))
+                        .collect();
+                    if !pkgs.is_empty() {
+                        return pkgs;
+                    }
+                }
+            }
+        }
+    }
+
+    for req_file in [".isladev-requirements.txt", "requirements.txt"] {
+        if let Ok(bytes) = fs::read(dir.join(req_file)) {
+            let text = String::from_utf8_lossy(&bytes);
+            let pkgs: Vec<String> = text
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.to_string())
+                .collect();
+            if !pkgs.is_empty() {
+                return pkgs;
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn inspect_project_cleanable(proj_path: &Path, proj_name: &str) -> ProjectDiskInfo {
+    let mut cache_bytes = 0u64;
+    let mut targets_found = Vec::new();
+    let mut libraries_detected = Vec::new();
+    let mut restore_commands = Vec::new();
+
+    for (rel, dir) in candidate_project_dirs(proj_path) {
+        let prefix = if rel.is_empty() {
+            String::new()
+        } else {
+            format!("{rel}\\")
+        };
+
+        let mut dir_targets = Vec::new();
+        let mut found_venv: Option<String> = None;
+
+        for &t in CLEAN_TARGETS {
+            let tp = dir.join(t);
+            if tp.is_dir() {
+                let sz = dir_size_bytes(&tp);
+                cache_bytes = cache_bytes.saturating_add(sz);
+                let label = format!("{prefix}{t}");
+                targets_found.push(label);
+                dir_targets.push(t.to_string());
+                if (t == ".venv" || t == "venv") && found_venv.is_none() {
+                    found_venv = Some(t.to_string());
+                }
+            }
+        }
+
+        if dir_targets.is_empty() {
+            continue;
+        }
+
+        // Inspeccionar librerías Node (package.json)
+        let pkg_json = dir.join("package.json");
+        if pkg_json.is_file() {
+            if let Ok(content) = fs::read_to_string(&pkg_json) {
+                for (dep, ver) in read_json_object_pairs(&content, "dependencies") {
+                    let tag = if rel.is_empty() {
+                        format!("{dep} ({ver})")
+                    } else {
+                        format!("[{rel}] {dep} ({ver})")
+                    };
+                    if !libraries_detected.contains(&tag) {
+                        libraries_detected.push(tag);
+                    }
+                }
+                for (dep, ver) in read_json_object_pairs(&content, "devDependencies") {
+                    let tag = if rel.is_empty() {
+                        format!("{dep} [dev] ({ver})")
+                    } else {
+                        format!("[{rel}] {dep} [dev] ({ver})")
+                    };
+                    if !libraries_detected.contains(&tag) {
+                        libraries_detected.push(tag);
+                    }
+                }
+            }
+            if dir_targets.iter().any(|t| t == "node_modules") {
+                let pm = detect_package_manager(&dir);
+                let cmd = if rel.is_empty() {
+                    format!("{pm} install")
+                } else {
+                    format!("cd /d \"{rel}\" && {pm} install")
+                };
+                restore_commands.push(cmd);
+            }
+        }
+
+        // Inspeccionar dependencias Rust (Cargo.toml)
+        let cargo_toml = dir.join("Cargo.toml");
+        if cargo_toml.is_file() {
+            for dep in detect_cargo_deps(&cargo_toml) {
+                let tag = if rel.is_empty() {
+                    format!("crate: {dep}")
+                } else {
+                    format!("[{rel}] crate: {dep}")
+                };
+                if !libraries_detected.contains(&tag) {
+                    libraries_detected.push(tag);
+                }
+            }
+            if dir_targets.iter().any(|t| t == "target") {
+                let cmd = if rel.is_empty() {
+                    "cargo check".to_string()
+                } else {
+                    format!("cd /d \"{rel}\" && cargo check")
+                };
+                restore_commands.push(cmd);
+            }
+        }
+
+        // Inspeccionar dependencias Python (.venv / venv / requirements.txt)
+        let is_python = found_venv.is_some()
+            || dir.join("requirements.txt").is_file()
+            || dir.join("pyproject.toml").is_file();
+        if is_python {
+            let py_pkgs = detect_python_deps(&dir, found_venv.as_deref());
+            for pkg in &py_pkgs {
+                let tag = if rel.is_empty() {
+                    format!("pip: {pkg}")
+                } else {
+                    format!("[{rel}] pip: {pkg}")
+                };
+                if !libraries_detected.contains(&tag) {
+                    libraries_detected.push(tag);
+                }
+            }
+            if let Some(vname) = found_venv {
+                let install_part = if !py_pkgs.is_empty() {
+                    format!("python -m venv {vname} && {vname}\\Scripts\\pip install -r .isladev-requirements.txt")
+                } else if dir.join("requirements.txt").is_file() {
+                    format!("python -m venv {vname} && {vname}\\Scripts\\pip install -r requirements.txt")
+                } else {
+                    format!("python -m venv {vname}")
+                };
+                let cmd = if rel.is_empty() {
+                    install_part
+                } else {
+                    format!("cd /d \"{rel}\" && {install_part}")
+                };
+                restore_commands.push(cmd);
+            }
+        }
+    }
+
+    ProjectDiskInfo {
+        project_name: proj_name.to_string(),
+        project_path: proj_path.to_string_lossy().to_string(),
+        cache_bytes,
+        targets_found,
+        libraries_detected,
+        restore_commands,
+    }
+}
+
+pub fn scan_all_projects_disk(
+    projects: Vec<(String, String)>,
+    tx: Sender<WorkMsg>,
+    hwnd: isize,
+) {
+    std::thread::spawn(move || {
+        let mut results = Vec::new();
+        for (name, path) in projects {
+            let p = PathBuf::from(&path);
+            if p.is_dir() {
+                let info = inspect_project_cleanable(&p, &name);
+                if info.cache_bytes > 0 || !info.targets_found.is_empty() {
+                    results.push(info);
+                }
+            }
+        }
+        results.sort_by(|a, b| b.cache_bytes.cmp(&a.cache_bytes));
+        let _ = tx.send(WorkMsg::DiskScanResult(results));
+        notify_hwnd(hwnd);
+    });
+}
+
+pub fn clean_project_with_recipe(info: &ProjectDiskInfo) -> std::result::Result<CleanManifest, String> {
+    let proj_path = Path::new(&info.project_path);
+    if !proj_path.is_dir() {
+        return Err("La carpeta del proyecto no existe".into());
+    }
+
+    // 1. Antes de borrar .venv / venv, congelar paquetes exactos en .isladev-requirements.txt
+    for (_rel, dir) in candidate_project_dirs(proj_path) {
+        for vname in [".venv", "venv"] {
+            let vdir = dir.join(vname);
+            let py = vdir.join("Scripts").join("python.exe");
+            if vdir.is_dir() && py.is_file() {
+                if let Ok(out) = Command::new(&py)
+                    .args(["-m", "pip", "list", "--format=freeze"])
+                    .current_dir(&dir)
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output()
+                {
+                    if out.status.success() {
+                        let frozen = String::from_utf8_lossy(&out.stdout);
+                        if !frozen.trim().is_empty() {
+                            let _ = fs::write(dir.join(".isladev-requirements.txt"), frozen.as_bytes());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Guardar receta legible .isladev-restore.txt en la raíz del proyecto
+    let mut recipe = String::new();
+    recipe.push_str("=== RECETA DE RESTAURACION - ISLA DEV ===\n");
+    recipe.push_str(&format!("Proyecto: {}\n", info.project_name));
+    recipe.push_str(&format!("Ruta: {}\n", info.project_path));
+    recipe.push_str(&format!("Espacio recuperado aprox.: {}\n", format_bytes(info.cache_bytes)));
+    recipe.push_str("\n[Carpetas limpiadas]\n");
+    for t in &info.targets_found {
+        recipe.push_str(&format!("- {t}\n"));
+    }
+    recipe.push_str("\n[Librerias detectadas antes de limpiar]\n");
+    if info.libraries_detected.is_empty() {
+        recipe.push_str("- (Sin dependencias declaradas / solo artefactos compilados)\n");
+    } else {
+        for lib in &info.libraries_detected {
+            recipe.push_str(&format!("- {lib}\n"));
+        }
+    }
+    recipe.push_str("\n[Comandos para restaurar todo con 1 clic en Isla Dev]\n");
+    if info.restore_commands.is_empty() {
+        recipe.push_str("- (Se regeneran automaticamente al iniciar el servidor o compilar)\n");
+    } else {
+        for cmd in &info.restore_commands {
+            recipe.push_str(&format!("- {cmd}\n"));
+        }
+    }
+    let _ = fs::write(proj_path.join(".isladev-restore.txt"), recipe);
+
+    // 3. Eliminar carpetas de caché/dependencias y medir lo realmente liberado
+    let mut removed_list = Vec::new();
+    let mut locked_errors = Vec::new();
+    for rel_target in &info.targets_found {
+        let full = proj_path.join(rel_target);
+        if full.is_dir() {
+            if let Err(e) = fs::remove_dir_all(&full) {
+                locked_errors.push(format!("{rel_target}: {e}"));
+            } else {
+                removed_list.push(rel_target.clone());
+            }
+        }
+    }
+
+    if removed_list.is_empty() && !locked_errors.is_empty() {
+        return Err(format!("Archivos en uso por otro proceso: {}", locked_errors[0]));
+    }
+
+    Ok(CleanManifest {
+        project_path: info.project_path.clone(),
+        project_name: info.project_name.clone(),
+        cleaned_at: config::now(),
+        freed_bytes: info.cache_bytes,
+        targets_removed: removed_list,
+        libraries_summary: info.libraries_detected.clone(),
+        restore_commands: info.restore_commands.clone(),
+    })
+}
+
+pub fn run_clean_projects_bg(
+    items: Vec<ProjectDiskInfo>,
+    tx: Sender<WorkMsg>,
+    hwnd: isize,
+) {
+    std::thread::spawn(move || {
+        let mut manifests = Vec::new();
+        let mut freed_total = 0u64;
+        let mut err_count = 0usize;
+        let mut last_err = String::new();
+        let total = items.len().max(1);
+
+        for (idx, info) in items.iter().enumerate() {
+            let _ = tx.send(WorkMsg::Progress(
+                (idx as f32 / total as f32).max(0.1),
+                format!("Guardando receta y limpiando {}...", info.project_name),
+            ));
+            notify_hwnd(hwnd);
+            match clean_project_with_recipe(info) {
+                Ok(m) => {
+                    freed_total = freed_total.saturating_add(m.freed_bytes);
+                    manifests.push(m);
+                }
+                Err(e) => {
+                    err_count += 1;
+                    last_err = e;
+                }
+            }
+        }
+
+        let message = if manifests.is_empty() && err_count > 0 {
+            format!("No se pudo limpiar: {last_err}")
+        } else if err_count > 0 {
+            format!(
+                "{} liberados ({} proyecto(s) con archivos en uso)",
+                format_bytes(freed_total),
+                err_count
+            )
+        } else {
+            format!(
+                "{} liberados · Receta guardada para restaurar en 1 clic",
+                format_bytes(freed_total)
+            )
+        };
+        let _ = tx.send(WorkMsg::DiskCleanDone {
+            manifests,
+            message,
+        });
+        notify_hwnd(hwnd);
+    });
+}
+
+fn append_line_shared(shared: &Arc<Mutex<File>>, line: &str) {
+    if let Ok(mut f) = shared.lock() {
+        let _ = writeln!(f, "{line}");
+        let _ = f.flush();
+    }
+}
+
+fn run_cmd_streaming_to_log(
+    cmd_str: &str,
+    cwd: &Path,
+    shared: &Arc<Mutex<File>>,
+) -> std::result::Result<bool, String> {
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/C", cmd_str])
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let h1 = stdout.map(|out| {
+        let sh = Arc::clone(shared);
+        std::thread::spawn(move || {
+            for line in BufReader::new(out).lines().map_while(std::result::Result::ok) {
+                append_line_shared(&sh, &strip_ansi(&line));
+            }
+        })
+    });
+    let h2 = stderr.map(|err| {
+        let sh = Arc::clone(shared);
+        std::thread::spawn(move || {
+            for line in BufReader::new(err).lines().map_while(std::result::Result::ok) {
+                append_line_shared(&sh, &strip_ansi(&line));
+            }
+        })
+    });
+    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    if let Some(h) = h1 {
+        let _ = h.join();
+    }
+    if let Some(h) = h2 {
+        let _ = h.join();
+    }
+    Ok(ok)
+}
+
+pub fn restore_project_from_manifest(
+    manifest: CleanManifest,
+    log_path: PathBuf,
+    tx: Sender<WorkMsg>,
+    hwnd: isize,
+) {
+    std::thread::spawn(move || {
+        let proj_dir = PathBuf::from(&manifest.project_path);
+        let Ok(file) = File::create(&log_path) else {
+            let _ = tx.send(WorkMsg::RestoreDone {
+                project_path: manifest.project_path,
+                project_name: manifest.project_name,
+                ok: false,
+                message: "No se pudo crear archivo de log".into(),
+                log_path,
+            });
+            notify_hwnd(hwnd);
+            return;
+        };
+        let shared = Arc::new(Mutex::new(file));
+        append_line_shared(
+            &shared,
+            &format!("=== Restaurando dependencias de {} ===", manifest.project_name),
+        );
+
+        let cmds = if manifest.restore_commands.is_empty() {
+            vec!["echo Proyecto sin comandos de instalacion pendientes".to_string()]
+        } else {
+            manifest.restore_commands.clone()
+        };
+
+        let mut all_ok = true;
+        let mut last_err = String::new();
+        let total = cmds.len().max(1);
+
+        for (idx, cmd_str) in cmds.iter().enumerate() {
+            let _ = tx.send(WorkMsg::Progress(
+                (idx as f32 / total as f32).clamp(0.1, 0.9),
+                format!("Ejecutando: {}", short(cmd_str)),
+            ));
+            notify_hwnd(hwnd);
+            append_line_shared(&shared, &format!("\n$ {cmd_str}"));
+
+            match run_cmd_streaming_to_log(cmd_str, &proj_dir, &shared) {
+                Ok(true) => {}
+                Ok(false) => {
+                    all_ok = false;
+                    last_err = format!("Fallo: {cmd_str}");
+                }
+                Err(e) => {
+                    all_ok = false;
+                    last_err = e.clone();
+                    append_line_shared(&shared, &format!("ERROR: {e}"));
+                }
+            }
+        }
+
+        append_line_shared(
+            &shared,
+            if all_ok {
+                "\n=== Restauracion completada con exito ==="
+            } else {
+                "\n=== Restauracion finalizada con advertencias o errores ==="
+            },
+        );
+        let msg = if all_ok {
+            "Dependencias restauradas correctamente".into()
+        } else {
+            last_err
+        };
+        let _ = tx.send(WorkMsg::RestoreDone {
+            project_path: manifest.project_path,
+            project_name: manifest.project_name,
+            ok: all_ok,
+            message: msg,
+            log_path,
+        });
+        notify_hwnd(hwnd);
+    });
+}
+
+// ============================================================================
+// 7. CONSOLA INTEGRADA EN VIVO (LIVE CONSOLE)
+// ============================================================================
+
+pub fn read_log_tail(log_path: &Path, max_lines: usize) -> Vec<String> {
+    let Ok(bytes) = fs::read(log_path) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<String> = text.lines().map(strip_ansi).collect();
+    if lines.len() > max_lines {
+        let start = lines.len() - max_lines;
+        lines.drain(..start);
+    }
+    lines
+}
+
+pub fn clear_log_file(log_path: &Path) -> std::io::Result<()> {
+    fs::write(log_path, "=== Consola limpiada ===\n")
+}
+
+pub fn extract_last_error_block(log_path: &Path) -> String {
+    let lines = read_log_tail(log_path, 300);
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut err_idx = None;
+    for (idx, line) in lines.iter().enumerate().rev() {
+        let low = line.to_lowercase();
+        if low.contains("error")
+            || low.contains("err!")
+            || low.contains("failed")
+            || low.contains("panic")
+            || low.contains("exception")
+            || low.contains("syntaxerror")
+            || low.contains("typeerror")
+            || low.contains("referenceerror")
+            || low.contains("eaddrinuse")
+            || low.contains("cannot find")
+            || low.contains("fatal:")
+            || low.contains("traceback")
+            || low.contains("no se reconoce")
+            || low.contains("is not recognized")
+        {
+            err_idx = Some(idx);
+            break;
+        }
+    }
+    let (start, end) = if let Some(pos) = err_idx {
+        (pos.saturating_sub(8), (pos + 14).min(lines.len()))
+    } else {
+        (lines.len().saturating_sub(20), lines.len())
+    };
+    lines[start..end].join("\n")
+}
+
+// ============================================================================
+// 8. QUICK RUNNER (SCRIPTS Y HERRAMIENTAS RAPIDAS POR PROYECTO)
+// ============================================================================
+
+pub fn detect_project_runner_items(proj_path: &Path) -> Vec<RunnerItem> {
+    let mut items = Vec::new();
+    for (rel, dir) in candidate_project_dirs(proj_path) {
+        let scope_prefix = if rel.is_empty() {
+            String::new()
+        } else {
+            format!("[{rel}] ")
+        };
+
+        // 1. Scripts de package.json
+        if dir.join("package.json").is_file() {
+            let pm = detect_package_manager(&dir);
+            for (name, script_body) in detect_package_scripts(&dir) {
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}{pm} run {name}"),
+                    subtitle: short(&script_body),
+                    command: format!("{pm} run {name}"),
+                    cwd: dir.clone(),
+                    category: "Script".into(),
+                });
+            }
+
+            let pkg_txt = fs::read_to_string(dir.join("package.json")).unwrap_or_default();
+            if dir.join("prisma").join("schema.prisma").is_file() || pkg_txt.contains("\"prisma\"") {
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}Prisma Studio"),
+                    subtitle: "Abrir navegador visual de base de datos".into(),
+                    command: "npx prisma studio".into(),
+                    cwd: dir.clone(),
+                    category: "Herramienta".into(),
+                });
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}Prisma Generate"),
+                    subtitle: "Regenerar cliente Prisma".into(),
+                    command: "npx prisma generate".into(),
+                    cwd: dir.clone(),
+                    category: "Herramienta".into(),
+                });
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}Prisma DB Push"),
+                    subtitle: "Sincronizar schema.prisma a la BD".into(),
+                    command: "npx prisma db push".into(),
+                    cwd: dir.clone(),
+                    category: "Herramienta".into(),
+                });
+            }
+        }
+
+        // 2. Herramientas Cargo (Rust)
+        if dir.join("Cargo.toml").is_file() {
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Cargo Check"),
+                subtitle: "Verificar compilacion rapida sin enlazar".into(),
+                command: "cargo check".into(),
+                cwd: dir.clone(),
+                category: "Cargo".into(),
+            });
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Cargo Test"),
+                subtitle: "Ejecutar suite de pruebas unitarias".into(),
+                command: "cargo test".into(),
+                cwd: dir.clone(),
+                category: "Cargo".into(),
+            });
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Cargo Clippy"),
+                subtitle: "Analizador de advertencias y buenas practicas".into(),
+                command: "cargo clippy".into(),
+                cwd: dir.clone(),
+                category: "Cargo".into(),
+            });
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Cargo Build Release"),
+                subtitle: "Compilar binario optimizado --release".into(),
+                command: "cargo build --release".into(),
+                cwd: dir.clone(),
+                category: "Cargo".into(),
+            });
+        }
+
+        // 3. Herramientas Python
+        let venv_py = if dir.join(".venv").join("Scripts").join("python.exe").is_file() {
+            Some(".venv\\Scripts\\python")
+        } else if dir.join("venv").join("Scripts").join("python.exe").is_file() {
+            Some("venv\\Scripts\\python")
+        } else if dir.join("requirements.txt").is_file() || dir.join("pyproject.toml").is_file() || dir.join("manage.py").is_file() {
+            Some("python")
+        } else {
+            None
+        };
+        if let Some(py) = venv_py {
+            if dir.join("manage.py").is_file() {
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}Django Migrate"),
+                    subtitle: "Aplicar migraciones de base de datos".into(),
+                    command: format!("{py} manage.py migrate"),
+                    cwd: dir.clone(),
+                    category: "Python".into(),
+                });
+            }
+            if dir.join("tests").is_dir() || dir.join("pytest.ini").is_file() {
+                items.push(RunnerItem {
+                    label: format!("{scope_prefix}Pytest"),
+                    subtitle: "Ejecutar pruebas con pytest".into(),
+                    command: format!("{py} -m pytest"),
+                    cwd: dir.clone(),
+                    category: "Python".into(),
+                });
+            }
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Pip List"),
+                subtitle: "Listar paquetes Python instalados".into(),
+                command: format!("{py} -m pip list"),
+                cwd: dir.clone(),
+                category: "Python".into(),
+            });
+        }
+
+        // 4. Docker Compose
+        if dir.join("docker-compose.yml").is_file()
+            || dir.join("docker-compose.yaml").is_file()
+            || dir.join("compose.yaml").is_file()
+        {
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Docker Compose Up"),
+                subtitle: "Levantar contenedores en segundo plano (-d)".into(),
+                command: "docker compose up -d".into(),
+                cwd: dir.clone(),
+                category: "Docker".into(),
+            });
+            items.push(RunnerItem {
+                label: format!("{scope_prefix}Docker Compose Down"),
+                subtitle: "Detener contenedores del proyecto".into(),
+                command: "docker compose down".into(),
+                cwd: dir.clone(),
+                category: "Docker".into(),
+            });
+        }
+    }
+    items
+}
+
+pub fn run_runner_item_logged(
+    proj_name: &str,
+    item: &RunnerItem,
+    tx: Sender<WorkMsg>,
+    hwnd: isize,
+) -> PathBuf {
+    let log_path = config::logs_dir().join(format!("runner-{}.log", safe_slug(proj_name)));
+    let label = item.label.clone();
+    let cmd_str = item.command.clone();
+    let cwd = item.cwd.clone();
+    let lp = log_path.clone();
+    let title = format!("{proj_name} · {label}");
+
+    if let Ok(mut f) = File::create(&lp) {
+        let _ = writeln!(f, "=== Quick Runner: {title} ===");
+        let _ = writeln!(f, "Directorio: {}", cwd.display());
+        let _ = writeln!(f, "$ {cmd_str}\n");
+        let _ = f.flush();
+    }
+
+    std::thread::spawn(move || {
+        let file = OpenOptions::new().create(true).append(true).open(&lp);
+        let Ok(file) = file else {
+            let _ = tx.send(WorkMsg::RunnerTaskDone {
+                title,
+                ok: false,
+                message: "No se pudo abrir archivo de log".into(),
+                log_path: lp,
+            });
+            notify_hwnd(hwnd);
+            return;
+        };
+        let shared = Arc::new(Mutex::new(file));
+
+        match run_cmd_streaming_to_log(&cmd_str, &cwd, &shared) {
+            Ok(ok) => {
+                append_line_shared(
+                    &shared,
+                    if ok {
+                        "\n=== Comando finalizado (exit 0) ==="
+                    } else {
+                        "\n=== Comando termino con errores ==="
+                    },
+                );
+                let _ = tx.send(WorkMsg::RunnerTaskDone {
+                    title,
+                    ok,
+                    message: if ok {
+                        "Ejecucion completada".into()
+                    } else {
+                        "Termino con error".into()
+                    },
+                    log_path: lp,
+                });
+                notify_hwnd(hwnd);
+            }
+            Err(e) => {
+                append_line_shared(&shared, &format!("ERROR al iniciar comando: {e}"));
+                let _ = tx.send(WorkMsg::RunnerTaskDone {
+                    title,
+                    ok: false,
+                    message: e,
+                    log_path: lp,
+                });
+                notify_hwnd(hwnd);
+            }
+        }
+    });
+
+    log_path
 }

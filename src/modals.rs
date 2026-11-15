@@ -1086,5 +1086,474 @@ impl App {
         }
         self.hit(lx, y, tw, h, Hit::Pill);
     }
+
+    fn draw_modal_tabs(&self, lx: f32, ry: f32, tabs: &[(&str, f32, Hit)], active: usize) {
+        let mut cx = lx;
+        for (i, &(label, w, hit_id)) in tabs.iter().enumerate() {
+            let is_act = i == active;
+            let hov = self.hov(hit_id);
+            let bg = if is_act { ACCENT } else if hov { CARD_HOV } else { CARD };
+            let alpha = if is_act { 0.22 } else { 0.92 };
+            let border = if is_act { ACCENT } else { BORDER };
+            self.gfx.rrect(cx, ry, w, 28.0, 7.0, bg, alpha);
+            self.gfx.rrect_stroke(cx, ry, w, 28.0, 7.0, border, if is_act { 0.85 } else { 0.7 }, 1.0);
+            let tc = if is_act { WHITE } else { GRAY };
+            self.gfx.text(label, &self.gfx.f.sub_c, cx, ry + 5.0, w, 18.0, tc, 1.0);
+            self.hit(cx, ry, w, 28.0, hit_id);
+            cx += w + 8.0;
+        }
+    }
+
+    fn draw_vscroll(&self, x: f32, y: f32, h: f32, scroll: usize, visible: usize, total: usize) {
+        if total <= visible || h <= 16.0 {
+            return;
+        }
+        self.gfx.rrect(x, y, 4.0, h, 2.0, WHITE, 0.08);
+        let max_scroll = total - visible;
+        let thumb_h = ((visible as f32 / total as f32) * h).clamp(24.0, h);
+        let frac = (scroll.min(max_scroll) as f32) / (max_scroll.max(1) as f32);
+        let thumb_y = y + frac * (h - thumb_h);
+        self.gfx.rrect(x, thumb_y, 4.0, thumb_h, 2.0, GRAY, 0.55);
+    }
+
+    fn draw_footer_status(&self, lx: f32, y: f32, tw: f32, msg: &Option<(String, bool)>, fallback: &str) {
+        if let Some((text, is_err)) = msg {
+            let col = if *is_err { RED } else { GREEN };
+            self.gfx.rrect(lx, y, tw, 24.0, 6.0, col, 0.14);
+            self.gfx.rrect_stroke(lx, y, tw, 24.0, 6.0, col, 0.45, 1.0);
+            self.gfx.text(text, &self.gfx.f.tiny, lx + 10.0, y + 4.0, tw - 20.0, 16.0, col, 1.0);
+        } else {
+            self.gfx.text(fallback, &self.gfx.f.tiny, lx, y + 4.0, tw, 16.0, DIM, 1.0);
+        }
+    }
+
+    pub(crate) fn draw_env_modal(&self, lx: f32, y: f32, tw: f32) {
+        let g = &self.gfx;
+        let proj_name = self.cfg.projects.get(self.env_proj_idx).map(|p| p.name.as_str()).unwrap_or("Proyecto");
+        let env_file = if self.env_filename.is_empty() { ".env" } else { &self.env_filename };
+        let sub = format!("{} - {}", proj_name, env_file);
+        self.header(lx, y, tw, "Variables de Entorno", &sub, true);
+
+        let mut ry = y + 60.0;
+        let t0 = format!("Proyecto ({})", self.env_vars.len());
+        let t1 = format!("Boveda ({})", self.cfg.env_vault.len());
+        self.draw_modal_tabs(lx, ry, &[(&t0, 126.0, Hit::EnvTab(0)), (&t1, 126.0, Hit::EnvTab(1))], self.env_tab);
+
+        let sync_w = 176.0;
+        let mask_w = 104.0;
+        self.pill_action_btn(
+            lx + tw - mask_w,
+            ry,
+            mask_w,
+            28.0,
+            if self.env_masked { "Mostrar" } else { "Ocultar" },
+            if self.env_masked { ACCENT } else { AMBER },
+            true,
+            Hit::EnvToggleMask,
+        );
+        self.pill_action_btn(
+            lx + tw - mask_w - sync_w - 8.0,
+            ry,
+            sync_w,
+            28.0,
+            "Sincronizar .env.example",
+            CYAN,
+            true,
+            Hit::EnvSyncExample,
+        );
+
+        ry += 38.0;
+        let list_bottom = y + 444.0;
+
+        if self.env_tab == 0 {
+            let key_w = 188.0;
+            let save_w = 88.0;
+            let val_w = (tw - key_w - save_w - 16.0).max(120.0);
+            self.draw_input_box(lx, ry, key_w, 34.0, "CLAVE (ej. API_KEY)", &self.env_key_in, self.env_focus == 0, Hit::EnvKeyInput);
+            self.draw_input_box(lx + key_w + 8.0, ry, val_w, 34.0, "Valor o pega KEY=VAL", &self.env_val_in, self.env_focus == 1, Hit::EnvValInput);
+            self.pill_action_btn(lx + tw - save_w, ry + 1.0, save_w, 32.0, "Guardar", GREEN, !self.env_key_in.trim().is_empty(), Hit::EnvSaveVar);
+            ry += 40.0;
+            g.text("Tab cambia de campo | Puedes pegar texto con formato CLAVE=VALOR directamente", &g.f.tiny, lx, ry, tw, 15.0, DIM, 1.0);
+            ry += 20.0;
+
+            let avail_h = (list_bottom - ry).max(42.0);
+            let step = 42.0;
+            let vis = ((avail_h + 4.0) / step).floor().max(1.0) as usize;
+
+            if self.env_vars.is_empty() {
+                g.rrect(lx, ry, tw, 64.0, 10.0, CARD, 0.85);
+                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, BORDER, 0.7, 1.0);
+                g.text("No hay variables en este archivo. Agrega una arriba o inyecta desde tu Boveda.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, GRAY, 1.0);
+            } else {
+                let row_w = tw - 10.0;
+                let max_s = self.env_vars.len().saturating_sub(vis);
+                let scroll = self.env_scroll.min(max_s);
+                for (r, (k, v)) in self.env_vars.iter().enumerate().skip(scroll).take(vis) {
+                    let row_y = ry + (r - scroll) as f32 * step;
+                    g.rrect(lx, row_y, row_w, 38.0, 8.0, CARD, 0.90);
+                    g.rrect_stroke(lx, row_y, row_w, 38.0, 8.0, BORDER, 0.65, 1.0);
+
+                    g.text(k, &g.f.body, lx + 12.0, row_y + 9.0, 180.0, 20.0, CYAN, 1.0);
+                    let val_disp = if v.is_empty() {
+                        "(vacio)".to_string()
+                    } else if self.env_masked {
+                        "********".to_string()
+                    } else {
+                        v.clone()
+                    };
+                    let val_col = if v.is_empty() { DIM } else if self.env_masked { GRAY } else { BODY };
+                    g.text(&val_disp, &g.f.sub, lx + 198.0, row_y + 10.0, (row_w - 332.0).max(80.0), 18.0, val_col, 1.0);
+
+                    let bx = lx + row_w - 122.0;
+                    let by = row_y + 6.0;
+                    self.mini_action_btn(bx, by, 26.0, G_COPY, CYAN, false, Hit::EnvCopyVal(r));
+                    self.mini_action_btn(bx + 30.0, by, 26.0, G_EDIT, ACCENT, false, Hit::EnvEditVar(r));
+                    self.mini_action_btn(bx + 60.0, by, 26.0, G_DOWNLOAD, AMBER, false, Hit::EnvSaveToVault(r));
+                    self.mini_action_btn(bx + 90.0, by, 26.0, G_TRASH, RED, false, Hit::EnvDeleteVar(r));
+                }
+                self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.env_vars.len());
+            }
+        } else {
+            g.rrect(lx, ry, tw, 34.0, 8.0, CARD, 0.85);
+            g.rrect_stroke(lx, ry, tw, 34.0, 8.0, BORDER, 0.65, 1.0);
+            g.text("Claves personales persistentes. Haz clic en Inyectar para copiarlas al proyecto actual.", &g.f.sub, lx + 12.0, ry + 8.0, tw - 24.0, 18.0, GRAY, 1.0);
+            ry += 42.0;
+
+            let avail_h = (list_bottom - ry).max(42.0);
+            let step = 42.0;
+            let vis = ((avail_h + 4.0) / step).floor().max(1.0) as usize;
+
+            if self.cfg.env_vault.is_empty() {
+                g.rrect(lx, ry, tw, 64.0, 10.0, CARD, 0.85);
+                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, BORDER, 0.7, 1.0);
+                g.text("Tu Boveda esta vacia. Guarda variables desde la pestana Proyecto para reutilizarlas aqui.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, GRAY, 1.0);
+            } else {
+                let row_w = tw - 10.0;
+                let max_s = self.cfg.env_vault.len().saturating_sub(vis);
+                let scroll = self.env_scroll.min(max_s);
+                for (r, entry) in self.cfg.env_vault.iter().enumerate().skip(scroll).take(vis) {
+                    let row_y = ry + (r - scroll) as f32 * step;
+                    g.rrect(lx, row_y, row_w, 38.0, 8.0, CARD, 0.90);
+                    g.rrect_stroke(lx, row_y, row_w, 38.0, 8.0, BORDER, 0.65, 1.0);
+
+                    g.text(&entry.key, &g.f.body, lx + 12.0, row_y + 9.0, 186.0, 20.0, AMBER, 1.0);
+                    let val_disp = if entry.value.is_empty() {
+                        "(vacio)".to_string()
+                    } else if self.env_masked {
+                        "********".to_string()
+                    } else {
+                        entry.value.clone()
+                    };
+                    g.text(&val_disp, &g.f.sub, lx + 204.0, row_y + 10.0, (row_w - 332.0).max(80.0), 18.0, GRAY, 1.0);
+
+                    let bx = lx + row_w - 118.0;
+                    self.pill_action_btn(bx, row_y + 6.0, 80.0, 26.0, "Inyectar", GREEN, true, Hit::EnvVaultInject(r));
+                    self.mini_action_btn(bx + 86.0, row_y + 6.0, 26.0, G_TRASH, RED, false, Hit::EnvVaultDelete(r));
+                }
+                self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.cfg.env_vault.len());
+            }
+        }
+
+        self.draw_footer_status(lx, y + 452.0, tw, &self.env_msg, "Los cambios se escriben directo en disco | Esc: Volver");
+    }
+
+    pub(crate) fn draw_cleaner_modal(&self, lx: f32, y: f32, tw: f32) {
+        let g = &self.gfx;
+        let total_bytes: u64 = self.clean_items.iter().map(|i| i.cache_bytes).sum();
+        self.header(lx, y, tw, "Limpiador Inteligente y Recetas", "Inspecciona librerias, libera espacio y restaura con 1 clic", true);
+
+        let mut ry = y + 60.0;
+        let t0 = format!("Recuperable ({})", actions::format_bytes(total_bytes));
+        let t1 = format!("Recetas ({})", self.cfg.clean_manifests.len());
+        self.draw_modal_tabs(lx, ry, &[(&t0, 176.0, Hit::CleanerTab(0)), (&t1, 132.0, Hit::CleanerTab(1))], self.clean_tab);
+
+        let rescan_w = 108.0;
+        let clean_all_w = 122.0;
+        self.pill_action_btn(
+            lx + tw - clean_all_w,
+            ry,
+            clean_all_w,
+            28.0,
+            "Limpiar todo",
+            RED,
+            !self.clean_items.is_empty() && !self.clean_scanning,
+            Hit::CleanerCleanAll,
+        );
+        self.pill_action_btn(
+            lx + tw - clean_all_w - rescan_w - 8.0,
+            ry,
+            rescan_w,
+            28.0,
+            "Reescanear",
+            CYAN,
+            !self.clean_scanning,
+            Hit::CleanerRescan,
+        );
+
+        ry += 38.0;
+        let area_h = (y + 468.0 - ry).max(120.0);
+
+        if self.clean_tab == 0 {
+            if self.clean_scanning {
+                g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
+                g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
+                let cx = lx + tw * 0.5;
+                let cy = ry + area_h * 0.42;
+                for i in 0..8 {
+                    let a = i as f32 / 8.0 * std::f32::consts::TAU + self.spin * 5.0;
+                    let fade = 0.2 + 0.8 * (i as f32 / 8.0);
+                    g.circle(cx + a.cos() * 14.0, cy + a.sin() * 14.0, 2.4, CYAN, fade);
+                }
+                g.text("Escaneando node_modules, target, .next, .venv y analizando librerias...", &g.f.sub_c, lx + 24.0, cy + 28.0, tw - 48.0, 22.0, WHITE, 1.0);
+            } else if self.clean_items.is_empty() {
+                g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
+                g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
+                g.text("No hay caches pesados detectados en tus proyectos.", &g.f.body, lx + 24.0, ry + 130.0, tw - 48.0, 24.0, GREEN, 1.0);
+                g.text("Si limpiaste alguno recientemente, revisa la pestana Recetas para restaurar sus dependencias.", &g.f.sub, lx + 24.0, ry + 160.0, tw - 48.0, 22.0, GRAY, 1.0);
+            } else {
+                let left_w = 252.0;
+                let step = 50.0;
+                let vis = ((area_h + 4.0) / step).floor().max(1.0) as usize;
+                let max_s = self.clean_items.len().saturating_sub(vis);
+                let scroll = self.clean_scroll.min(max_s);
+
+                for (i, item) in self.clean_items.iter().enumerate().skip(scroll).take(vis) {
+                    let row_y = ry + (i - scroll) as f32 * step;
+                    let sel = i == self.clean_sel_idx;
+                    self.row_bg(lx, row_y, left_w - 8.0, 46.0, Hit::CleanerSelectProj(i), sel);
+                    g.text(&item.project_name, &g.f.body, lx + 12.0, row_y + 6.0, left_w - 28.0, 18.0, WHITE, 1.0);
+                    let meta = format!("{}  |  {} objetivos", actions::format_bytes(item.cache_bytes), item.targets_found.len());
+                    g.text(&meta, &g.f.tiny, lx + 12.0, row_y + 26.0, left_w - 28.0, 15.0, AMBER, 1.0);
+                }
+                self.draw_vscroll(lx + left_w - 4.0, ry, area_h, scroll, vis, self.clean_items.len());
+
+                let detail_x = lx + left_w + 10.0;
+                let detail_w = (tw - left_w - 10.0).max(200.0);
+                g.rrect(detail_x, ry, detail_w, area_h, 12.0, CARD, 0.92);
+                g.rrect_stroke(detail_x, ry, detail_w, area_h, 12.0, BORDER, 0.75, 1.0);
+
+                let sel_idx = self.clean_sel_idx.min(self.clean_items.len() - 1);
+                if let Some(sel) = self.clean_items.get(sel_idx) {
+                    let pad_x = detail_x + 14.0;
+                    let inner_w = detail_w - 28.0;
+                    let mut dy = ry + 12.0;
+
+                    g.text(&sel.project_name, &g.f.title, pad_x, dy, inner_w - 92.0, 22.0, WHITE, 1.0);
+                    let sz_txt = actions::format_bytes(sel.cache_bytes);
+                    g.rrect(detail_x + detail_w - 96.0, dy, 82.0, 22.0, 6.0, AMBER, 0.16);
+                    g.text(&sz_txt, &g.f.badge, detail_x + detail_w - 96.0, dy + 3.0, 82.0, 16.0, AMBER, 1.0);
+                    dy += 26.0;
+
+                    g.text(&sel.project_path, &g.f.tiny, pad_x, dy, inner_w, 15.0, DIM, 1.0);
+                    dy += 20.0;
+
+                    g.text("CARPETAS A ELIMINAR", &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    dy += 15.0;
+                    let targets_str = sel.targets_found.join(", ");
+                    g.rrect(pad_x, dy, inner_w, 40.0, 7.0, WHITE, 0.04);
+                    g.text(&targets_str, &g.f.tiny, pad_x + 8.0, dy + 5.0, inner_w - 16.0, 30.0, RED, 1.0);
+                    dy += 48.0;
+
+                    let lib_hdr = format!("LIBRERIAS QUE SE GUARDARAN EN RECETA ({})", sel.libraries_detected.len());
+                    g.text(&lib_hdr, &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    dy += 15.0;
+                    let libs_preview = if sel.libraries_detected.is_empty() {
+                        "Solo artefactos de compilacion (sin dependencias externas declaradas)".to_string()
+                    } else {
+                        let shown: Vec<String> = sel.libraries_detected.iter().take(12).cloned().collect();
+                        let extra = sel.libraries_detected.len().saturating_sub(12);
+                        if extra > 0 {
+                            format!("{} (+{} mas guardadas en .isladev-restore.txt)", shown.join(", "), extra)
+                        } else {
+                            shown.join(", ")
+                        }
+                    };
+                    g.rrect(pad_x, dy, inner_w, 108.0, 7.0, CYAN, 0.06);
+                    g.text(&libs_preview, &g.f.tiny, pad_x + 8.0, dy + 6.0, inner_w - 16.0, 96.0, CYAN, 1.0);
+                    dy += 116.0;
+
+                    g.text("COMANDO DE RESTAURACION", &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    dy += 15.0;
+                    let cmds = if sel.restore_commands.is_empty() {
+                        "Sin reinstalacion requerida".to_string()
+                    } else {
+                        sel.restore_commands.join(" && ")
+                    };
+                    g.rrect(pad_x, dy, inner_w, 34.0, 7.0, GREEN, 0.08);
+                    g.text(&cmds, &g.f.tiny, pad_x + 8.0, dy + 5.0, inner_w - 16.0, 24.0, GREEN, 1.0);
+
+                    let btn_y = ry + area_h - 42.0;
+                    self.pill_action_btn(pad_x, btn_y, inner_w, 30.0, "Limpiar y guardar receta de restauracion", RED, true, Hit::CleanerCleanOne(sel_idx));
+                }
+            }
+        } else if self.cfg.clean_manifests.is_empty() {
+            g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
+            g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
+            g.text("Aun no hay recetas guardadas. Al limpiar espacio, aqui veras que librerias tenia cada repo para reinstalarlas.", &g.f.sub_c, lx + 24.0, ry + 150.0, tw - 48.0, 36.0, GRAY, 1.0);
+        } else {
+            let step = 90.0;
+            let vis = ((area_h + 4.0) / step).floor().max(1.0) as usize;
+            let row_w = tw - 10.0;
+            let max_s = self.cfg.clean_manifests.len().saturating_sub(vis);
+            let scroll = self.clean_scroll.min(max_s);
+
+            for (i, m) in self.cfg.clean_manifests.iter().enumerate().skip(scroll).take(vis) {
+                let row_y = ry + (i - scroll) as f32 * step;
+                g.rrect(lx, row_y, row_w, 84.0, 10.0, CARD, 0.92);
+                g.rrect_stroke(lx, row_y, row_w, 84.0, 10.0, BORDER, 0.7, 1.0);
+
+                g.text(&m.project_name, &g.f.body, lx + 14.0, row_y + 8.0, 240.0, 20.0, WHITE, 1.0);
+                let badge = format!("Liberado: {} | {}", actions::format_bytes(m.freed_bytes), m.cleaned_at);
+                g.text(&badge, &g.f.tiny, lx + 260.0, row_y + 10.0, row_w - 432.0, 16.0, AMBER, 1.0);
+
+                let targets = format!("Eliminado: {}", m.targets_removed.join(", "));
+                g.text(&targets, &g.f.tiny, lx + 14.0, row_y + 30.0, row_w - 186.0, 15.0, GRAY, 1.0);
+
+                let libs_txt = if m.libraries_summary.is_empty() {
+                    "Librerias: solo caches/compilacion".to_string()
+                } else {
+                    let preview: Vec<String> = m.libraries_summary.iter().take(6).cloned().collect();
+                    format!("Librerias ({}): {}", m.libraries_summary.len(), preview.join(", "))
+                };
+                g.text(&libs_txt, &g.f.tiny, lx + 14.0, row_y + 47.0, row_w - 186.0, 15.0, CYAN, 1.0);
+
+                let cmd_txt = format!("Comando: {}", m.restore_commands.join(" && "));
+                g.text(&cmd_txt, &g.f.tiny, lx + 14.0, row_y + 64.0, row_w - 186.0, 15.0, DIM, 1.0);
+
+                self.pill_action_btn(lx + row_w - 162.0, row_y + 27.0, 148.0, 30.0, "Restaurar librerias", GREEN, true, Hit::CleanerRestore(i));
+            }
+            self.draw_vscroll(lx + tw - 5.0, ry, area_h, scroll, vis, self.cfg.clean_manifests.len());
+        }
+
+        self.draw_footer_status(lx, y + 474.0, tw, &self.clean_msg, "Cada limpieza guarda .isladev-restore.txt en el repo y en config.toml | Ctrl+D");
+    }
+
+    pub(crate) fn draw_console_modal(&self, lx: f32, y: f32, tw: f32) {
+        let g = &self.gfx;
+        let active_src = self.con_sources.get(self.con_source_idx);
+        let sub = active_src.map(|s| s.0.as_str()).unwrap_or("Sin logs activos");
+        self.header(lx, y, tw, "Consola de Logs en Vivo", sub, true);
+
+        let mut ry = y + 60.0;
+        let max_tabs = 4usize;
+        let tab_w = ((tw - (max_tabs as f32 - 1.0) * 8.0) / max_tabs as f32).min(162.0);
+        for (i, src) in self.con_sources.iter().take(max_tabs).enumerate() {
+            let tx = lx + i as f32 * (tab_w + 8.0);
+            let is_act = i == self.con_source_idx;
+            let hov = self.hov(Hit::ConsoleSelectSource(i));
+            g.rrect(tx, ry, tab_w, 26.0, 6.0, if is_act { CYAN } else if hov { CARD_HOV } else { CARD }, if is_act { 0.20 } else { 0.90 });
+            g.rrect_stroke(tx, ry, tab_w, 26.0, 6.0, if is_act { CYAN } else { BORDER }, 0.75, 1.0);
+            g.text(&src.0, &g.f.tiny_c, tx + 6.0, ry + 5.0, tab_w - 12.0, 16.0, if is_act { WHITE } else { GRAY }, 1.0);
+            self.hit(tx, ry, tab_w, 26.0, Hit::ConsoleSelectSource(i));
+        }
+
+        ry += 34.0;
+        let has_srv = active_src.and_then(|s| s.2.as_ref()).is_some();
+        self.pill_action_btn(lx, ry, 152.0, 28.0, "Copiar ultimo error", RED, !self.con_lines.is_empty(), Hit::ConsoleCopyLastError);
+        self.pill_action_btn(lx + 160.0, ry, 102.0, 28.0, "Copiar todo", CYAN, !self.con_lines.is_empty(), Hit::ConsoleCopyAll);
+        self.pill_action_btn(lx + 270.0, ry, 84.0, 28.0, "Limpiar", AMBER, active_src.is_some(), Hit::ConsoleClear);
+        if has_srv {
+            self.pill_action_btn(lx + 362.0, ry, 144.0, 28.0, "Reiniciar servidor", GREEN, true, Hit::ConsoleRestartServer);
+        }
+        self.pill_action_btn(lx + tw - 134.0, ry, 134.0, 28.0, "Terminal externa", GRAY, active_src.is_some(), Hit::ConsoleOpenExternal);
+
+        ry += 36.0;
+        let box_h = (y + 444.0 - ry).max(160.0);
+        g.rrect(lx, ry, tw, box_h, 10.0, 0x07090D, 0.96);
+        g.rrect_stroke(lx, ry, tw, box_h, 10.0, BORDER, 0.85, 1.0);
+
+        if self.con_lines.is_empty() {
+            g.text("Esperando salida del proceso... Inicia un servidor, script o restauracion para verlo aqui.", &g.f.sub_c, lx + 20.0, ry + box_h * 0.45, tw - 40.0, 22.0, DIM, 1.0);
+        } else {
+            let line_h = 18.0;
+            let max_vis = ((box_h - 16.0) / line_h).floor().max(1.0) as usize;
+            let total = self.con_lines.len();
+            let end = total.saturating_sub(self.con_scroll.min(total.saturating_sub(max_vis)));
+            let start = end.saturating_sub(max_vis);
+
+            for (idx, line) in self.con_lines[start..end].iter().enumerate() {
+                let ly = ry + 8.0 + idx as f32 * line_h;
+                let lower = line.to_lowercase();
+                let col = if lower.contains("error") || lower.contains("err!") || lower.contains("failed") || lower.contains("fatal") || lower.contains("panic") || lower.contains("exception") || lower.contains("traceback") {
+                    RED
+                } else if lower.contains("warn") || lower.contains("deprecated") {
+                    AMBER
+                } else if lower.contains("http://") || lower.contains("https://") || lower.starts_with("[isla-dev]") || lower.starts_with("---") {
+                    CYAN
+                } else if lower.contains("ready") || lower.contains("listening") || lower.contains("compiled") || lower.contains("success") || lower.contains("completad") {
+                    GREEN
+                } else {
+                    BODY
+                };
+                g.text(line, &g.f.tiny, lx + 12.0, ly, tw - 28.0, line_h, col, 1.0);
+            }
+            let scroll_from_top = start;
+            self.draw_vscroll(lx + tw - 8.0, ry + 8.0, box_h - 16.0, scroll_from_top, max_vis, total);
+        }
+
+        self.draw_footer_status(lx, y + 452.0, tw, &self.con_msg, "Actualizacion en vivo cada 450 ms | Ctrl+L: Consola | Esc: Volver");
+    }
+
+    pub(crate) fn draw_runner_modal(&self, lx: f32, y: f32, tw: f32) {
+        let g = &self.gfx;
+        let proj = self.cfg.projects.get(self.run_proj_idx);
+        let proj_name = proj.map(|p| p.name.as_str()).unwrap_or("Proyecto");
+        let proj_path = proj.map(|p| p.path.as_str()).unwrap_or("");
+        let has_manifest = !proj_path.is_empty() && self.cfg.clean_manifests.iter().any(|m| m.project_path.eq_ignore_ascii_case(proj_path));
+
+        self.header(lx, y, tw, "Quick Runner y Herramientas", proj_name, true);
+
+        let mut ry = y + 60.0;
+        self.pill_action_btn(lx, ry, 130.0, 28.0, "Variables .env", CYAN, true, Hit::RunnerOpenEnv);
+        if has_manifest {
+            self.pill_action_btn(lx + 138.0, ry, 232.0, 28.0, "Restaurar librerias eliminadas", GREEN, true, Hit::RunnerRestoreDeps);
+        } else {
+            let cnt = format!("{} comandos detectados en el proyecto", self.run_items.len());
+            g.text(&cnt, &g.f.sub, lx + 144.0, ry + 5.0, tw - 150.0, 18.0, GRAY, 1.0);
+        }
+
+        ry += 38.0;
+        let list_bottom = y + 430.0;
+        let avail_h = (list_bottom - ry).max(48.0);
+        let step = 46.0;
+        let vis = ((avail_h + 4.0) / step).floor().max(1.0) as usize;
+
+        if self.run_items.is_empty() {
+            g.rrect(lx, ry, tw, 72.0, 10.0, CARD, 0.88);
+            g.rrect_stroke(lx, ry, tw, 72.0, 10.0, BORDER, 0.7, 1.0);
+            g.text("No se detectaron scripts (package.json, Cargo.toml, Python o Docker) en este proyecto.", &g.f.sub_c, lx + 16.0, ry + 26.0, tw - 32.0, 22.0, GRAY, 1.0);
+        } else {
+            let row_w = tw - 10.0;
+            let max_s = self.run_items.len().saturating_sub(vis);
+            let scroll = self.run_scroll.min(max_s);
+            for (i, item) in self.run_items.iter().enumerate().skip(scroll).take(vis) {
+                let row_y = ry + (i - scroll) as f32 * step;
+                let hov = self.hov(Hit::RunnerExec(i));
+                self.row_bg(lx, row_y, row_w, 42.0, Hit::RunnerExec(i), false);
+
+                let cat_l = item.category.to_lowercase();
+                let badge_col = if cat_l.contains("prisma") {
+                    ACCENT
+                } else if cat_l.contains("cargo") || cat_l.contains("rust") {
+                    AMBER
+                } else if cat_l.contains("py") || cat_l.contains("django") {
+                    GREEN
+                } else {
+                    CYAN
+                };
+                g.rrect(lx + 10.0, row_y + 11.0, 68.0, 20.0, 5.0, badge_col, 0.16);
+                g.text(&item.category, &g.f.tiny_c, lx + 10.0, row_y + 13.0, 68.0, 16.0, badge_col, 1.0);
+
+                g.text(&item.label, &g.f.body, lx + 88.0, row_y + 4.0, row_w - 134.0, 18.0, WHITE, 1.0);
+                let sub = if item.subtitle.is_empty() { &item.command } else { &item.subtitle };
+                g.text(sub, &g.f.tiny, lx + 88.0, row_y + 22.0, row_w - 134.0, 15.0, DIM, 1.0);
+
+                g.text(G_PLAY, &g.f.icon_sm, lx + row_w - 32.0, row_y + 14.0, 20.0, 16.0, if hov { GREEN } else { GRAY }, 1.0);
+            }
+            self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.run_items.len());
+        }
+
+        g.text("Haz clic en un comando para ejecutarlo en vivo dentro de la Consola | Ctrl+R | Esc: Volver", &g.f.tiny, lx, y + 438.0, tw, 18.0, DIM, 1.0);
+    }
 }
 

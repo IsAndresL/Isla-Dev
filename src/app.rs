@@ -12,8 +12,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::actions::{self, FullStackInfo, GitInfo, OpenProjectWindow, WorkMsg, WM_WORKER};
-use crate::config::{self, hex, Config, Launcher, Library, Project, Template};
+use crate::actions::{self, FullStackInfo, GitInfo, OpenProjectWindow, ProjectDiskInfo, RunnerItem, WorkMsg, WM_WORKER};
+use crate::config::{self, hex, Config, EnvEntry, Launcher, Library, Project, Template};
 use crate::gfx::Gfx;
 
 pub const WIN_W: f32 = 820.0;
@@ -24,6 +24,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_ANIM: usize = 1;
 const TIMER_POLL: usize = 2;
 const TIMER_TOPMOST: usize = 3;
+const TIMER_CONSOLE: usize = 4;
 const HOTKEY_ID: i32 = 1;
 pub(crate) const MAX_ROWS: usize = 6;
 
@@ -65,6 +66,9 @@ pub(crate) const G_SYNC: &str = "\u{E895}";
 pub(crate) const G_LINK: &str = "\u{E71B}";
 pub(crate) const G_BOLT: &str = "\u{E945}";
 pub(crate) const G_WORK: &str = "\u{E821}";
+pub(crate) const G_KEY: &str = "\u{E8D7}";
+pub(crate) const G_DISK: &str = "\u{EDA2}";
+pub(crate) const G_COPY: &str = "\u{E8C8}";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FilterMode {
@@ -109,6 +113,10 @@ pub enum Hit {
     ProjTerm(usize),
     ProjExplorer(usize),
     ProjPin(usize),
+    ProjRunner(usize),
+    ProjEnv(usize),
+    OpenDiskCleaner,
+    OpenLiveConsole,
     OpenWinFocus(usize),
     OpenWinClose(usize),
     NewProject,
@@ -161,6 +169,37 @@ pub enum Hit {
     EdSave,
     EdDeleteItem(usize),
     EdToggleLibDefault(usize),
+    // Env Manager Modal
+    EnvTab(usize),
+    EnvToggleMask,
+    EnvSyncExample,
+    EnvKeyInput,
+    EnvValInput,
+    EnvSaveVar,
+    EnvCopyVal(usize),
+    EnvEditVar(usize),
+    EnvDeleteVar(usize),
+    EnvSaveToVault(usize),
+    EnvVaultInject(usize),
+    EnvVaultDelete(usize),
+    // Smart Disk Cleaner Modal
+    CleanerTab(usize),
+    CleanerRescan,
+    CleanerSelectProj(usize),
+    CleanerCleanOne(usize),
+    CleanerCleanAll,
+    CleanerRestore(usize),
+    // Live Console Modal
+    ConsoleSelectSource(usize),
+    ConsoleCopyLastError,
+    ConsoleCopyAll,
+    ConsoleClear,
+    ConsoleRestartServer,
+    ConsoleOpenExternal,
+    // Quick Runner Modal
+    RunnerExec(usize),
+    RunnerOpenEnv,
+    RunnerRestoreDeps,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -173,6 +212,10 @@ pub(crate) enum View {
     NoteModal,
     WorkspaceModal,
     CustomEditor,
+    EnvModal,
+    CleanerModal,
+    ConsoleModal,
+    RunnerModal,
     Status,
 }
 
@@ -304,6 +347,35 @@ pub struct App {
     pub(crate) ed_f3: String,
     pub(crate) ed_scroll: usize,
     pub(crate) ed_msg: Option<(String, bool)>,
+    // Gestor .env y Bóveda
+    pub(crate) env_proj_idx: usize,
+    pub(crate) env_filename: String,
+    pub(crate) env_vars: Vec<(String, String)>,
+    pub(crate) env_tab: usize,
+    pub(crate) env_masked: bool,
+    pub(crate) env_focus: usize,
+    pub(crate) env_key_in: String,
+    pub(crate) env_val_in: String,
+    pub(crate) env_scroll: usize,
+    pub(crate) env_msg: Option<(String, bool)>,
+    // Limpiador inteligente de cachés y recetas
+    pub(crate) clean_tab: usize,
+    pub(crate) clean_scanning: bool,
+    pub(crate) clean_items: Vec<ProjectDiskInfo>,
+    pub(crate) clean_sel_idx: usize,
+    pub(crate) clean_scroll: usize,
+    pub(crate) clean_msg: Option<(String, bool)>,
+    // Consola integrada en vivo
+    pub(crate) con_sources: Vec<(String, PathBuf, Option<String>)>,
+    pub(crate) con_source_idx: usize,
+    pub(crate) con_lines: Vec<String>,
+    pub(crate) con_scroll: usize,
+    pub(crate) con_msg: Option<(String, bool)>,
+    // Quick Runner por proyecto
+    pub(crate) run_proj_idx: usize,
+    pub(crate) run_items: Vec<RunnerItem>,
+    pub(crate) run_scroll: usize,
+    pub(crate) last_task_log: Option<(String, PathBuf)>,
     // estado / notificaciones
     pub(crate) skind: SKind,
     pub(crate) s_title: String,
@@ -407,6 +479,31 @@ impl App {
             ed_f3: String::from("React + Vite"),
             ed_scroll: 0,
             ed_msg: None,
+            env_proj_idx: 0,
+            env_filename: String::from(".env"),
+            env_vars: Vec::new(),
+            env_tab: 0,
+            env_masked: true,
+            env_focus: 0,
+            env_key_in: String::new(),
+            env_val_in: String::new(),
+            env_scroll: 0,
+            env_msg: None,
+            clean_tab: 0,
+            clean_scanning: false,
+            clean_items: Vec::new(),
+            clean_sel_idx: 0,
+            clean_scroll: 0,
+            clean_msg: None,
+            con_sources: Vec::new(),
+            con_source_idx: 0,
+            con_lines: Vec::new(),
+            con_scroll: 0,
+            con_msg: None,
+            run_proj_idx: 0,
+            run_items: Vec::new(),
+            run_scroll: 0,
+            last_task_log: None,
             skind: SKind::Done,
             s_title: String::new(),
             s_sub: String::new(),
@@ -796,6 +893,7 @@ impl App {
         unsafe {
             let _ = KillTimer(self.hwnd, TIMER_POLL);
             let _ = KillTimer(self.hwnd, TIMER_TOPMOST);
+            let _ = KillTimer(self.hwnd, TIMER_CONSOLE);
             let _ = Shell_NotifyIconW(NIM_DELETE, &self.tray_data());
             let _ = UnregisterHotKey(self.hwnd, HOTKEY_ID);
             PostQuitMessage(0);
@@ -887,6 +985,10 @@ impl App {
             View::NoteModal => (540.0, 310.0, 26.0),
             View::WorkspaceModal => (500.0, 310.0, 26.0),
             View::CustomEditor => (548.0, 495.0, 26.0),
+            View::EnvModal => (660.0, 520.0, 24.0),
+            View::CleanerModal => (700.0, 540.0, 24.0),
+            View::ConsoleModal => (720.0, 520.0, 24.0),
+            View::RunnerModal => (640.0, 500.0, 24.0),
             View::Status => {
                 if self.skind == SKind::Creating || self.skind == SKind::Error {
                     (480.0, 64.0, 28.0)
@@ -976,19 +1078,8 @@ impl App {
         self.sa.v = 0.0;
     }
 
-    /// Cambia la vista activa sin destruir el progreso de creación, búsqueda o formularios.
-    pub(crate) fn set_view(&mut self, v: View) {
-        if v == self.view {
-            return;
-        }
-        self.view = v;
-        self.hover = None;
-        self.fade();
-        if v == View::Expanded {
-            actions::play_ui_sound("pop", self.cfg.sounds_enabled);
-            self.refresh_on_expand();
-        }
-        if matches!(
+    pub(crate) fn is_expanded_panel(v: View) -> bool {
+        matches!(
             v,
             View::Expanded
                 | View::Settings
@@ -997,7 +1088,34 @@ impl App {
                 | View::NoteModal
                 | View::WorkspaceModal
                 | View::CustomEditor
-        ) {
+                | View::EnvModal
+                | View::CleanerModal
+                | View::ConsoleModal
+                | View::RunnerModal
+        )
+    }
+
+    /// Cambia la vista activa sin destruir el progreso de creación, búsqueda o formularios.
+    pub(crate) fn set_view(&mut self, v: View) {
+        if v == self.view {
+            return;
+        }
+        let was_console = self.view == View::ConsoleModal;
+        self.view = v;
+        self.hover = None;
+        self.fade();
+        unsafe {
+            if was_console && v != View::ConsoleModal {
+                let _ = KillTimer(self.hwnd, TIMER_CONSOLE);
+            } else if !was_console && v == View::ConsoleModal {
+                SetTimer(self.hwnd, TIMER_CONSOLE, 450, None);
+            }
+        }
+        if v == View::Expanded {
+            actions::play_ui_sound("pop", self.cfg.sounds_enabled);
+            self.refresh_on_expand();
+        }
+        if Self::is_expanded_panel(v) {
             self.focus();
         } else if v == View::Compact {
             unsafe {
@@ -1017,16 +1135,7 @@ impl App {
 
     /// Minimiza la isla a la gota guardando la vista actual para restaurarla intacta al volver a abrirla.
     pub(crate) fn minimize_preserving_state(&mut self) {
-        if matches!(
-            self.view,
-            View::Expanded
-                | View::Settings
-                | View::Wizard
-                | View::GitModal
-                | View::NoteModal
-                | View::WorkspaceModal
-                | View::CustomEditor
-        ) {
+        if Self::is_expanded_panel(self.view) {
             self.resume_view = Some(self.view);
         }
         self.set_view(View::Compact);
@@ -1061,6 +1170,8 @@ impl App {
                 | Some(Hit::ProjTerm(k))
                 | Some(Hit::ProjExplorer(k))
                 | Some(Hit::ProjPin(k))
+                | Some(Hit::ProjRunner(k))
+                | Some(Hit::ProjEnv(k))
                 if k == i
         )
     }
@@ -1403,7 +1514,14 @@ impl App {
                     self.goto_step(if self.cur_libs_len() > 0 { Step::Libraries } else { Step::Name })
                 }
             },
-            View::Settings | View::GitModal | View::NoteModal | View::WorkspaceModal => self.set_view(View::Expanded),
+            View::Settings
+            | View::GitModal
+            | View::NoteModal
+            | View::WorkspaceModal
+            | View::EnvModal
+            | View::CleanerModal
+            | View::ConsoleModal
+            | View::RunnerModal => self.set_view(View::Expanded),
             View::CustomEditor => self.set_view(View::Settings),
             View::Expanded if !self.search.is_empty() || self.filter_mode != FilterMode::All => {
                 self.search.clear();
@@ -1585,7 +1703,186 @@ impl App {
                         self.s_deadline = Some(Instant::now() + Duration::from_millis(2200));
                     }
                 }
+                WorkMsg::DiskScanResult(items) => {
+                    self.clean_scanning = false;
+                    self.clean_items = items;
+                    self.clean_sel_idx = self.clean_sel_idx.min(self.clean_items.len().saturating_sub(1));
+                    self.clean_scroll = 0;
+                    self.kick();
+                }
+                WorkMsg::DiskCleanDone {
+                    manifests,
+                    message,
+                } => {
+                    self.clean_scanning = false;
+                    self.bg_progress = None;
+                    let is_err = manifests.is_empty();
+                    for m in manifests {
+                        self.cfg
+                            .clean_manifests
+                            .retain(|x| !x.project_path.eq_ignore_ascii_case(&m.project_path));
+                        self.cfg.clean_manifests.insert(0, m.clone());
+                        self.clean_items
+                            .retain(|it| !it.project_path.eq_ignore_ascii_case(&m.project_path));
+                    }
+                    self.save();
+                    self.clean_sel_idx = self.clean_sel_idx.min(self.clean_items.len().saturating_sub(1));
+                    self.clean_scroll = 0;
+                    self.clean_msg = Some((message.clone(), is_err));
+                    if self.view == View::CleanerModal {
+                        actions::play_ui_sound(if is_err { "click" } else { "save" }, self.cfg.sounds_enabled);
+                        self.kick();
+                    } else {
+                        self.status(
+                            if is_err { SKind::Error } else { SKind::Done },
+                            "Limpiador de Espacio",
+                            &message,
+                            if is_err { RED } else { GREEN },
+                            "✓",
+                        );
+                        self.s_deadline = Some(Instant::now() + Duration::from_millis(2600));
+                    }
+                }
+                WorkMsg::RestoreDone {
+                    project_path,
+                    project_name,
+                    ok,
+                    message,
+                    log_path,
+                } => {
+                    self.bg_progress = None;
+                    if ok {
+                        self.cfg
+                            .clean_manifests
+                            .retain(|x| !x.project_path.eq_ignore_ascii_case(&project_path));
+                        self.save();
+                        actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                    }
+                    self.last_task_log = Some((format!("Restaurar: {project_name}"), log_path.clone()));
+                    if self.view == View::ConsoleModal {
+                        self.refresh_console_lines();
+                        self.con_msg = Some((format!("{project_name}: {message}"), !ok));
+                        self.kick();
+                    } else if ok {
+                        self.s_log_path = Some(log_path);
+                        self.status(SKind::Done, &format!("{project_name} restaurado"), &message, GREEN, "✓");
+                        self.s_deadline = Some(Instant::now() + Duration::from_millis(2400));
+                    } else {
+                        self.error(&format!("Error al restaurar {project_name}"), &message, Some(log_path));
+                    }
+                }
+                WorkMsg::RunnerTaskDone {
+                    title,
+                    ok,
+                    message,
+                    log_path,
+                } => {
+                    self.last_task_log = Some((title.clone(), log_path.clone()));
+                    if self.view == View::ConsoleModal {
+                        self.refresh_console_lines();
+                        self.con_msg = Some((format!("{title}: {message}"), !ok));
+                        self.kick();
+                    } else if !ok {
+                        self.error(&format!("Fallo en {title}"), &message, Some(log_path));
+                    }
+                }
             }
+        }
+    }
+
+    pub(crate) fn open_env_modal(&mut self, proj_idx: usize) {
+        let Some(p) = self.cfg.projects.get(proj_idx) else { return };
+        let (fname, vars) = actions::read_project_env(Path::new(&p.path));
+        self.env_proj_idx = proj_idx;
+        self.env_filename = fname;
+        self.env_vars = vars;
+        self.env_tab = 0;
+        self.env_masked = true;
+        self.env_focus = 0;
+        self.env_key_in.clear();
+        self.env_val_in.clear();
+        self.env_scroll = 0;
+        self.env_msg = None;
+        self.set_view(View::EnvModal);
+    }
+
+    pub(crate) fn open_cleaner_modal(&mut self) {
+        self.clean_tab = 0;
+        self.clean_scanning = true;
+        self.clean_sel_idx = 0;
+        self.clean_scroll = 0;
+        self.clean_msg = None;
+        let projs: Vec<(String, String)> = self
+            .cfg
+            .projects
+            .iter()
+            .map(|p| (p.name.clone(), p.path.clone()))
+            .collect();
+        actions::scan_all_projects_disk(projs, self.tx.clone(), self.hwnd.0 as isize);
+        self.set_view(View::CleanerModal);
+    }
+
+    pub(crate) fn open_runner_modal(&mut self, proj_idx: usize) {
+        let Some(p) = self.cfg.projects.get(proj_idx) else { return };
+        self.run_proj_idx = proj_idx;
+        self.run_items = actions::detect_project_runner_items(Path::new(&p.path));
+        self.run_scroll = 0;
+        self.set_view(View::RunnerModal);
+    }
+
+    pub(crate) fn rebuild_console_sources(&mut self, preferred: Option<(String, PathBuf, Option<String>)>) {
+        let mut sources: Vec<(String, PathBuf, Option<String>)> = Vec::new();
+        if let Some(pref) = preferred {
+            sources.push(pref);
+        }
+        for (cwd, srv) in &self.servers {
+            let lbl = if let Some(pt) = srv.port {
+                if srv.label == "Main" {
+                    format!("{} (:{pt})", srv.project_name)
+                } else {
+                    format!("{} {} (:{pt})", srv.project_name, srv.label)
+                }
+            } else {
+                srv.project_name.clone()
+            };
+            if !sources.iter().any(|s| s.1 == srv.log_path) {
+                sources.push((lbl, srv.log_path.clone(), Some(cwd.clone())));
+            }
+        }
+        if let Some((lbl, lp)) = &self.last_task_log {
+            if !sources.iter().any(|s| &s.1 == lp) {
+                sources.push((lbl.clone(), lp.clone(), None));
+            }
+        }
+        if let Some(lp) = &self.s_log_path {
+            if lp.exists() && !sources.iter().any(|s| &s.1 == lp) {
+                sources.push(("Última operación".into(), lp.clone(), None));
+            }
+        }
+        self.con_sources = sources;
+        self.con_source_idx = self.con_source_idx.min(self.con_sources.len().saturating_sub(1));
+    }
+
+    pub(crate) fn open_console_modal(&mut self, preferred: Option<(String, PathBuf, Option<String>)>) {
+        self.con_source_idx = 0;
+        self.con_scroll = 0;
+        self.con_msg = None;
+        self.rebuild_console_sources(preferred);
+        self.refresh_console_lines();
+        self.set_view(View::ConsoleModal);
+    }
+
+    pub(crate) fn refresh_console_lines(&mut self) -> bool {
+        let new_lines = self
+            .con_sources
+            .get(self.con_source_idx)
+            .map(|(_, lp, _)| actions::read_log_tail(lp, 220))
+            .unwrap_or_default();
+        if new_lines != self.con_lines {
+            self.con_lines = new_lines;
+            true
+        } else {
+            false
         }
     }
 
@@ -1724,14 +2021,13 @@ impl App {
                 if self.view == View::Status && self.skind == SKind::Error {
                     if let Some(lp) = self.s_log_path.clone() {
                         if lp.exists() {
-                            actions::open_log_in_terminal(
-                                &self.s_title,
-                                self.s_proj_path.as_deref(),
-                                &lp,
-                            );
+                            self.open_console_modal(Some((self.s_title.clone(), lp, None)));
+                        } else {
+                            self.set_view(View::Compact);
                         }
+                    } else {
+                        self.set_view(View::Compact);
                     }
-                    self.set_view(View::Compact);
                 } else if self.view == View::Status && self.skind == SKind::Creating {
                     // Al hacer clic en el banner mientras crea/clona/sube, minimizar a la gota con barra de progreso en el borde
                     self.resume_view = Some(View::Status);
@@ -1789,18 +2085,15 @@ impl App {
                 let matched = self
                     .servers
                     .iter()
-                    .find(|(_, s)| s.port == Some(port));
-                if let Some((cwd_str, srv)) = matched {
-                    actions::show_server_terminal(
-                        Some(&srv.project_name),
-                        Some(Path::new(cwd_str)),
-                        Some(port),
-                        Some(&srv.log_path),
-                    );
-                } else {
-                    actions::show_server_terminal(None, None, Some(port), None);
-                }
-                self.minimize_preserving_state();
+                    .find(|(_, s)| s.port == Some(port))
+                    .map(|(cwd, srv)| {
+                        (
+                            format!("{} (:{port})", srv.project_name),
+                            srv.log_path.clone(),
+                            Some(cwd.clone()),
+                        )
+                    });
+                self.open_console_modal(matched);
             }
             Hit::KillPort(port) => {
                 let matched_pid = self
@@ -1829,11 +2122,15 @@ impl App {
             Hit::ProjServer(i) => self.toggle_project_server(i),
             Hit::ProjServerRole(i, role) => self.toggle_project_server_role(i, role),
             Hit::ProjServerTerm(i) => {
-                if let Some(p) = self.cfg.projects.get(i) {
-                    let srv_port = self.servers.get(&p.path).and_then(|s| s.port);
-                    let lp = self.servers.get(&p.path).map(|s| s.log_path.as_path());
-                    actions::show_server_terminal(Some(&p.name), Some(Path::new(&p.path)), srv_port, lp);
-                    self.minimize_preserving_state();
+                if let Some(p) = self.cfg.projects.get(i).cloned() {
+                    let pref = self.servers.get(&p.path).map(|srv| {
+                        let lbl = srv
+                            .port
+                            .map(|pt| format!("{} (:{pt})", p.name))
+                            .unwrap_or_else(|| p.name.clone());
+                        (lbl, srv.log_path.clone(), Some(p.path.clone()))
+                    });
+                    self.open_console_modal(pref);
                 }
             }
             Hit::ProjGit(i) => {
@@ -1867,6 +2164,10 @@ impl App {
                 }
             }
             Hit::ProjPin(i) => self.toggle_pin(i),
+            Hit::ProjRunner(i) => self.open_runner_modal(i),
+            Hit::ProjEnv(i) => self.open_env_modal(i),
+            Hit::OpenDiskCleaner => self.open_cleaner_modal(),
+            Hit::OpenLiveConsole => self.open_console_modal(None),
             Hit::OpenWinFocus(idx) => {
                 if let Some(ow) = self.open_windows.get(idx).cloned() {
                     actions::bring_hwnd_to_front(HWND(ow.hwnd as _));
@@ -2052,14 +2353,14 @@ impl App {
                 }
             }
             Hit::GitOpenLogTerm => {
-                if let Some(p) = self.cfg.projects.get(self.git_proj_idx) {
+                if let Some(p) = self.cfg.projects.get(self.git_proj_idx).cloned() {
                     let lp = config::logs_dir().join(format!("git-{}.log", actions::safe_slug(&p.name)));
                     if lp.exists() {
-                        actions::open_log_in_terminal(&p.name, Some(Path::new(&p.path)), &lp);
+                        self.open_console_modal(Some((format!("Git · {}", p.name), lp, None)));
                     } else {
                         actions::open_terminal_at(Path::new(&p.path));
+                        self.minimize_preserving_state();
                     }
-                    self.minimize_preserving_state();
                 }
             }
             // Note Modal
@@ -2228,7 +2529,344 @@ impl App {
                 }
                 self.kick();
             }
+            // Env Manager Modal
+            Hit::EnvTab(t) => {
+                self.env_tab = t;
+                self.env_scroll = 0;
+                self.env_msg = None;
+                self.kick();
+            }
+            Hit::EnvToggleMask => {
+                self.env_masked = !self.env_masked;
+                self.kick();
+            }
+            Hit::EnvSyncExample => {
+                if let Some(p) = self.cfg.projects.get(self.env_proj_idx) {
+                    match actions::sync_env_example(Path::new(&p.path), &self.env_vars) {
+                        Ok(n) => {
+                            actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                            self.env_msg = Some((
+                                format!(".env.example sincronizado ({n} claves sin secretos)"),
+                                false,
+                            ));
+                        }
+                        Err(e) => {
+                            self.env_msg = Some((format!("Error al sincronizar: {e}"), true));
+                        }
+                    }
+                    self.kick();
+                }
+            }
+            Hit::EnvKeyInput => {
+                self.env_focus = 0;
+                self.kick();
+            }
+            Hit::EnvValInput => {
+                self.env_focus = 1;
+                self.kick();
+            }
+            Hit::EnvSaveVar => self.save_env_var_from_inputs(),
+            Hit::EnvCopyVal(idx) => {
+                if let Some((k, v)) = self.env_vars.get(idx) {
+                    if actions::write_clipboard_text(self.hwnd, v) {
+                        actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                        self.env_msg = Some((format!("Valor de {k} copiado"), false));
+                    }
+                    self.kick();
+                }
+            }
+            Hit::EnvEditVar(idx) => {
+                if let Some((k, v)) = self.env_vars.get(idx) {
+                    self.env_key_in = k.clone();
+                    self.env_val_in = v.clone();
+                    self.env_focus = 1;
+                    self.env_msg = None;
+                    self.kick();
+                }
+            }
+            Hit::EnvDeleteVar(idx) => {
+                if idx < self.env_vars.len() {
+                    let removed = self.env_vars.remove(idx);
+                    if let Some(p) = self.cfg.projects.get(self.env_proj_idx) {
+                        let _ = actions::write_project_env(
+                            Path::new(&p.path),
+                            &self.env_filename,
+                            &self.env_vars,
+                        );
+                    }
+                    self.env_scroll = self.env_scroll.min(self.env_vars.len().saturating_sub(5));
+                    self.env_msg = Some((format!("{} eliminada de {}", removed.0, self.env_filename), false));
+                    actions::play_ui_sound("delete", self.cfg.sounds_enabled);
+                    self.kick();
+                }
+            }
+            Hit::EnvSaveToVault(idx) => {
+                if let Some((k, v)) = self.env_vars.get(idx).cloned() {
+                    if let Some(pos) = self.cfg.env_vault.iter().position(|e| e.key == k) {
+                        self.cfg.env_vault[pos].value = v;
+                    } else {
+                        self.cfg.env_vault.push(EnvEntry { key: k.clone(), value: v });
+                    }
+                    self.save();
+                    actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                    self.env_msg = Some((format!("{k} guardada en tu Bóveda Personal"), false));
+                    self.kick();
+                }
+            }
+            Hit::EnvVaultInject(idx) => {
+                if let Some(entry) = self.cfg.env_vault.get(idx).cloned() {
+                    if let Some(pos) = self.env_vars.iter().position(|(k, _)| k == &entry.key) {
+                        self.env_vars[pos].1 = entry.value;
+                    } else {
+                        self.env_vars.push((entry.key.clone(), entry.value));
+                    }
+                    if let Some(p) = self.cfg.projects.get(self.env_proj_idx) {
+                        match actions::write_project_env(
+                            Path::new(&p.path),
+                            &self.env_filename,
+                            &self.env_vars,
+                        ) {
+                            Ok(()) => {
+                                actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                                self.env_msg = Some((
+                                    format!("{} inyectada en {}", entry.key, self.env_filename),
+                                    false,
+                                ));
+                            }
+                            Err(e) => {
+                                self.env_msg = Some((format!("Error al escribir: {e}"), true));
+                            }
+                        }
+                    }
+                    self.kick();
+                }
+            }
+            Hit::EnvVaultDelete(idx) => {
+                if idx < self.cfg.env_vault.len() {
+                    let rem = self.cfg.env_vault.remove(idx);
+                    self.save();
+                    actions::play_ui_sound("delete", self.cfg.sounds_enabled);
+                    self.env_msg = Some((format!("{} quitada de la bóveda", rem.key), false));
+                    self.kick();
+                }
+            }
+            // Smart Disk Cleaner Modal
+            Hit::CleanerTab(t) => {
+                self.clean_tab = t;
+                self.clean_scroll = 0;
+                self.clean_sel_idx = 0;
+                self.clean_msg = None;
+                self.kick();
+            }
+            Hit::CleanerRescan => {
+                self.clean_scanning = true;
+                self.clean_msg = None;
+                let projs: Vec<(String, String)> = self
+                    .cfg
+                    .projects
+                    .iter()
+                    .map(|p| (p.name.clone(), p.path.clone()))
+                    .collect();
+                actions::scan_all_projects_disk(projs, self.tx.clone(), self.hwnd.0 as isize);
+                self.kick();
+            }
+            Hit::CleanerSelectProj(idx) => {
+                self.clean_sel_idx = idx;
+                self.kick();
+            }
+            Hit::CleanerCleanOne(idx) => {
+                if let Some(item) = self.clean_items.get(idx).cloned() {
+                    self.clean_scanning = true;
+                    self.bg_progress = Some(0.15);
+                    actions::run_clean_projects_bg(vec![item], self.tx.clone(), self.hwnd.0 as isize);
+                    self.kick();
+                }
+            }
+            Hit::CleanerCleanAll => {
+                if !self.clean_items.is_empty() && !self.clean_scanning {
+                    self.clean_scanning = true;
+                    self.bg_progress = Some(0.1);
+                    actions::run_clean_projects_bg(
+                        self.clean_items.clone(),
+                        self.tx.clone(),
+                        self.hwnd.0 as isize,
+                    );
+                    self.kick();
+                }
+            }
+            Hit::CleanerRestore(idx) => {
+                if let Some(manifest) = self.cfg.clean_manifests.get(idx).cloned() {
+                    let lp = config::logs_dir()
+                        .join(format!("restore-{}.log", actions::safe_slug(&manifest.project_name)));
+                    let title = format!("Restaurar: {}", manifest.project_name);
+                    self.last_task_log = Some((title.clone(), lp.clone()));
+                    self.bg_progress = Some(0.1);
+                    actions::restore_project_from_manifest(
+                        manifest,
+                        lp.clone(),
+                        self.tx.clone(),
+                        self.hwnd.0 as isize,
+                    );
+                    self.open_console_modal(Some((title, lp, None)));
+                }
+            }
+            // Live Console Modal
+            Hit::ConsoleSelectSource(idx) => {
+                if idx < self.con_sources.len() {
+                    self.con_source_idx = idx;
+                    self.con_scroll = 0;
+                    self.con_msg = None;
+                    self.refresh_console_lines();
+                    self.kick();
+                }
+            }
+            Hit::ConsoleCopyLastError => {
+                if let Some((_, lp, _)) = self.con_sources.get(self.con_source_idx) {
+                    let err_txt = actions::extract_last_error_block(lp);
+                    if !err_txt.is_empty() && actions::write_clipboard_text(self.hwnd, &err_txt) {
+                        actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                        self.con_msg = Some((
+                            "Ultimo bloque de error copiado (listo para pegar)".into(),
+                            false,
+                        ));
+                    } else {
+                        self.con_msg = Some(("El log no tiene líneas para copiar".into(), true));
+                    }
+                    self.kick();
+                }
+            }
+            Hit::ConsoleCopyAll => {
+                let full = self.con_lines.join("\n");
+                if !full.is_empty() && actions::write_clipboard_text(self.hwnd, &full) {
+                    actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                    self.con_msg = Some(("Log completo copiado al portapapeles".into(), false));
+                } else {
+                    self.con_msg = Some(("Consola vacía".into(), true));
+                }
+                self.kick();
+            }
+            Hit::ConsoleClear => {
+                if let Some((_, lp, _)) = self.con_sources.get(self.con_source_idx).cloned() {
+                    let _ = actions::clear_log_file(&lp);
+                    self.con_scroll = 0;
+                    self.refresh_console_lines();
+                    self.con_msg = Some(("Consola limpiada".into(), false));
+                    self.kick();
+                }
+            }
+            Hit::ConsoleRestartServer => {
+                let cur_cwd = self
+                    .con_sources
+                    .get(self.con_source_idx)
+                    .and_then(|s| s.2.clone());
+                if let Some(cwd_str) = cur_cwd {
+                    let mut target_opt = None;
+                    let mut p_name = Path::new(&cwd_str)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Proyecto".into());
+                    for p in &self.cfg.projects {
+                        if let Some(fs) = self.fullstack_map.get(&p.path) {
+                            for t in [&fs.main, &fs.front, &fs.back].into_iter().flatten() {
+                                if t.cwd.to_string_lossy().eq_ignore_ascii_case(&cwd_str) {
+                                    target_opt = Some(t.clone());
+                                    p_name = p.name.clone();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    self.stop_single_target(Path::new(&cwd_str));
+                    if let Some(t) = target_opt {
+                        self.start_single_target(&p_name, &t);
+                        if let Some(srv) = self.servers.get(&cwd_str) {
+                            let lp = srv.log_path.clone();
+                            self.rebuild_console_sources(Some((p_name, lp, Some(cwd_str))));
+                            self.con_source_idx = 0;
+                            self.con_scroll = 0;
+                            self.refresh_console_lines();
+                            self.con_msg = Some(("Servidor reiniciado".into(), false));
+                        }
+                    } else {
+                        self.con_msg = Some(("Servidor detenido".into(), false));
+                    }
+                    self.kick();
+                }
+            }
+            Hit::ConsoleOpenExternal => {
+                if let Some((lbl, lp, cwd_opt)) = self.con_sources.get(self.con_source_idx).cloned() {
+                    let proj_p = cwd_opt.as_deref().map(Path::new);
+                    actions::open_log_in_terminal(&lbl, proj_p, &lp);
+                    self.minimize_preserving_state();
+                }
+            }
+            // Quick Runner Modal
+            Hit::RunnerExec(idx) => {
+                if let Some(item) = self.run_items.get(idx).cloned() {
+                    let proj_name = self
+                        .cfg
+                        .projects
+                        .get(self.run_proj_idx)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| "Proyecto".into());
+                    let lp = actions::run_runner_item_logged(
+                        &proj_name,
+                        &item,
+                        self.tx.clone(),
+                        self.hwnd.0 as isize,
+                    );
+                    let title = format!("Runner: {}", item.label);
+                    self.last_task_log = Some((title.clone(), lp.clone()));
+                    self.open_console_modal(Some((title, lp, None)));
+                }
+            }
+            Hit::RunnerOpenEnv => {
+                let idx = self.run_proj_idx;
+                self.open_env_modal(idx);
+            }
+            Hit::RunnerRestoreDeps => {
+                if let Some(p) = self.cfg.projects.get(self.run_proj_idx) {
+                    if let Some(m_idx) = self
+                        .cfg
+                        .clean_manifests
+                        .iter()
+                        .position(|m| m.project_path.eq_ignore_ascii_case(&p.path))
+                    {
+                        self.click(Hit::CleanerRestore(m_idx));
+                    }
+                }
+            }
         }
+    }
+
+    pub(crate) fn save_env_var_from_inputs(&mut self) {
+        let k = self.env_key_in.trim().to_string();
+        let v = self.env_val_in.clone();
+        if k.is_empty() {
+            self.env_msg = Some(("Escribe el nombre de la variable (ej. DATABASE_URL)".into(), true));
+            self.kick();
+            return;
+        }
+        if let Some(pos) = self.env_vars.iter().position(|(ek, _)| ek == &k) {
+            self.env_vars[pos].1 = v;
+        } else {
+            self.env_vars.push((k.clone(), v));
+        }
+        if let Some(p) = self.cfg.projects.get(self.env_proj_idx) {
+            match actions::write_project_env(Path::new(&p.path), &self.env_filename, &self.env_vars) {
+                Ok(()) => {
+                    actions::play_ui_sound("save", self.cfg.sounds_enabled);
+                    self.env_key_in.clear();
+                    self.env_val_in.clear();
+                    self.env_focus = 0;
+                    self.env_msg = Some((format!("{k} guardada en {}", self.env_filename), false));
+                }
+                Err(e) => {
+                    self.env_msg = Some((format!("Error al guardar: {e}"), true));
+                }
+            }
+        }
+        self.kick();
     }
 
     fn project_menu(&mut self, i: usize) {
@@ -2253,6 +2891,30 @@ impl App {
             }
 
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                215,
+                w!("Panel de Scripts y Herramientas (Ctrl+R)"),
+            );
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                216,
+                w!("Variables de Entorno (.env y Bóveda) (Ctrl+K)"),
+            );
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                217,
+                w!("Consola de Logs en Vivo (Ctrl+L)"),
+            );
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                218,
+                w!("Limpiar cachés guardando receta (Ctrl+D)"),
+            );
             let _ = AppendMenuW(
                 menu,
                 MF_STRING,
@@ -2350,6 +3012,20 @@ impl App {
                     let id = l.id.clone();
                     self.open_project(i, Some(id));
                 }
+            } else if cmd == 215 {
+                self.open_runner_modal(i);
+            } else if cmd == 216 {
+                self.open_env_modal(i);
+            } else if cmd == 217 {
+                let pref = srv_log.map(|lp| {
+                    let lbl = srv_port
+                        .map(|pt| format!("{} (:{pt})", p.name))
+                        .unwrap_or_else(|| p.name.clone());
+                    (lbl, lp, Some(p.path.clone()))
+                });
+                self.open_console_modal(pref);
+            } else if cmd == 218 {
+                self.open_cleaner_modal();
             } else if cmd == 210 {
                 self.note_proj_idx = i;
                 self.note_text = p.note.clone().unwrap_or_default();
@@ -2457,13 +3133,13 @@ impl App {
             } else if cmd == 300 {
                 self.toggle_project_server(i);
             } else if cmd == 302 {
-                actions::show_server_terminal(
-                    Some(&p.name),
-                    Some(Path::new(&p.path)),
-                    srv_port,
-                    srv_log.as_deref(),
-                );
-                self.minimize_preserving_state();
+                let pref = srv_log.map(|lp| {
+                    let lbl = srv_port
+                        .map(|pt| format!("{} (:{pt})", p.name))
+                        .unwrap_or_else(|| p.name.clone());
+                    (lbl, lp, Some(p.path.clone()))
+                });
+                self.open_console_modal(pref);
             } else if (400..415).contains(&cmd) {
                 if let Some((s_name, _)) = scripts.get(cmd - 400) {
                     if s_name == "dev" && !is_srv_running {
@@ -2654,6 +3330,10 @@ impl App {
                 self.ed_focus = (self.ed_focus + 1) % 2;
                 self.kick();
             }
+            x if x == VK_TAB.0 as u32 && self.view == View::EnvModal => {
+                self.env_focus = (self.env_focus + 1) % 2;
+                self.kick();
+            }
             x if x == VK_RETURN.0 as u32 && ctrl && self.view == View::Expanded => {
                 if let Some(proj_idx) = self.selected_project_idx() {
                     self.toggle_project_server(proj_idx);
@@ -2675,6 +3355,7 @@ impl App {
                     }
                 }
                 View::CustomEditor => self.save_custom_editor_item(),
+                View::EnvModal => self.save_env_var_from_inputs(),
                 View::Expanded => {
                     if let Some(proj_idx) = self.selected_project_idx() {
                         self.open_project(proj_idx, None);
@@ -2760,6 +3441,16 @@ impl App {
                         self.ed_msg = None;
                         self.kick();
                     }
+                    View::EnvModal => {
+                        let target = if self.env_focus == 0 {
+                            &mut self.env_key_in
+                        } else {
+                            &mut self.env_val_in
+                        };
+                        Self::pop_word(target);
+                        self.env_msg = None;
+                        self.kick();
+                    }
                     View::Wizard if self.step == Step::Name => {
                         Self::pop_word(&mut self.wiz_name);
                         self.wiz_err = None;
@@ -2774,6 +3465,7 @@ impl App {
                     self.open_project(proj_idx, None);
                 }
             }
+            0x44 if ctrl && self.view == View::Expanded => self.open_cleaner_modal(),
             0x45 if ctrl && self.view == View::Expanded => {
                 if let Some(proj_idx) = self.selected_project_idx() {
                     self.click(Hit::ProjExplorer(proj_idx));
@@ -2784,10 +3476,21 @@ impl App {
                     self.click(Hit::ProjGit(proj_idx));
                 }
             }
+            0x4B if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.open_env_modal(proj_idx);
+                }
+            }
+            0x4C if ctrl && self.view == View::Expanded => self.open_console_modal(None),
             0x4E if ctrl && self.view == View::Expanded => self.start_wizard(),
             0x50 if ctrl && self.view == View::Expanded => {
                 if let Some(proj_idx) = self.selected_project_idx() {
                     self.toggle_pin(proj_idx);
+                }
+            }
+            0x52 if ctrl && self.view == View::Expanded => {
+                if let Some(proj_idx) = self.selected_project_idx() {
+                    self.open_runner_modal(proj_idx);
                 }
             }
             0x53 if ctrl && self.view == View::Expanded => {
@@ -2825,6 +3528,38 @@ impl App {
                                 self.ed_msg = None;
                             }
                             ok
+                        }
+                        View::EnvModal => {
+                            let clean_line = txt.trim();
+                            if self.env_focus == 0
+                                && self.env_key_in.is_empty()
+                                && !clean_line.contains('\n')
+                                && clean_line.contains('=')
+                            {
+                                if let Some(eq) = clean_line.find('=') {
+                                    let k = clean_line[..eq].trim();
+                                    let v = clean_line[eq + 1..].trim();
+                                    let ok1 = Self::push_clipboard_clean(&mut self.env_key_in, k, 64, false, false);
+                                    let ok2 = Self::push_clipboard_clean(&mut self.env_val_in, v, 240, false, false);
+                                    if ok1 || ok2 {
+                                        self.env_msg = None;
+                                    }
+                                    ok1 || ok2
+                                } else {
+                                    false
+                                }
+                            } else {
+                                let (target, max_c) = if self.env_focus == 0 {
+                                    (&mut self.env_key_in, 64)
+                                } else {
+                                    (&mut self.env_val_in, 240)
+                                };
+                                let ok = Self::push_clipboard_clean(target, clean_line, max_c, false, false);
+                                if ok {
+                                    self.env_msg = None;
+                                }
+                                ok
+                            }
                         }
                         View::Wizard if self.step == Step::Name => {
                             let ok = Self::push_clipboard_clean(&mut self.wiz_name, &txt, 60, false, true);
@@ -2944,6 +3679,36 @@ impl App {
                     }
                 }
             }
+            View::EnvModal => {
+                let is_key = self.env_focus == 0;
+                let (target, max_c) = if is_key {
+                    (&mut self.env_key_in, 64)
+                } else {
+                    (&mut self.env_val_in, 240)
+                };
+                match c {
+                    8 => {
+                        target.pop();
+                        self.env_msg = None;
+                        self.kick();
+                        return Some(0);
+                    }
+                    13 | 27 | 9 => return Some(0),
+                    _ => {
+                        let Some(ch) = char::from_u32(c) else { return Some(0) };
+                        if !ch.is_control() && target.chars().count() < max_c {
+                            if is_key && ch == ' ' {
+                                target.push('_');
+                            } else {
+                                target.push(ch);
+                            }
+                            self.env_msg = None;
+                            self.kick();
+                        }
+                        return Some(0);
+                    }
+                }
+            }
             View::Wizard if self.step == Step::Name => {
                 match c {
                     8 => {
@@ -2986,6 +3751,10 @@ impl App {
                     } else if wp.0 == TIMER_TOPMOST {
                         if self.visible && !self.auto_hidden_fs {
                             actions::ensure_island_above_taskbar(self.hwnd);
+                        }
+                    } else if wp.0 == TIMER_CONSOLE && self.view == View::ConsoleModal {
+                        if self.refresh_console_lines() {
+                            self.kick();
                         }
                     }
                     Some(0)
@@ -3075,7 +3844,9 @@ impl App {
                         | Some(Hit::ProjNote(i))
                         | Some(Hit::ProjTerm(i))
                         | Some(Hit::ProjExplorer(i))
-                        | Some(Hit::ProjPin(i)) => self.project_menu(i),
+                        | Some(Hit::ProjPin(i))
+                        | Some(Hit::ProjRunner(i))
+                        | Some(Hit::ProjEnv(i)) => self.project_menu(i),
                         Some(Hit::FilterChip(FilterMode::Workspace(k))) | Some(Hit::EditWorkspace(k)) => {
                             self.workspace_menu(k);
                         }
@@ -3123,6 +3894,52 @@ impl App {
                             };
                             self.kick();
                         }
+                        View::EnvModal => {
+                            let list_len = if self.env_tab == 0 {
+                                self.env_vars.len()
+                            } else {
+                                self.cfg.env_vault.len()
+                            };
+                            let max = list_len.saturating_sub(5);
+                            self.env_scroll = if d < 0 {
+                                (self.env_scroll + 1).min(max)
+                            } else {
+                                self.env_scroll.saturating_sub(1)
+                            };
+                            self.kick();
+                        }
+                        View::CleanerModal => {
+                            let list_len = if self.clean_tab == 0 {
+                                self.clean_items.len()
+                            } else {
+                                self.cfg.clean_manifests.len()
+                            };
+                            let max = list_len.saturating_sub(5);
+                            self.clean_scroll = if d < 0 {
+                                (self.clean_scroll + 1).min(max)
+                            } else {
+                                self.clean_scroll.saturating_sub(1)
+                            };
+                            self.kick();
+                        }
+                        View::ConsoleModal => {
+                            let max = self.con_lines.len().saturating_sub(16);
+                            self.con_scroll = if d > 0 {
+                                (self.con_scroll + 3).min(max)
+                            } else {
+                                self.con_scroll.saturating_sub(3)
+                            };
+                            self.kick();
+                        }
+                        View::RunnerModal => {
+                            let max = self.run_items.len().saturating_sub(6);
+                            self.run_scroll = if d < 0 {
+                                (self.run_scroll + 1).min(max)
+                            } else {
+                                self.run_scroll.saturating_sub(1)
+                            };
+                            self.kick();
+                        }
                         _ => {}
                     }
                     Some(0)
@@ -3142,16 +3959,7 @@ impl App {
                             self.glow_anim = 0.0;
                             self.kick();
                         }
-                        if matches!(
-                            self.view,
-                            View::Expanded
-                                | View::Settings
-                                | View::Wizard
-                                | View::GitModal
-                                | View::NoteModal
-                                | View::WorkspaceModal
-                                | View::CustomEditor
-                        ) {
+                        if Self::is_expanded_panel(self.view) {
                             self.minimize_preserving_state();
                         } else if self.view == View::Status && self.skind == SKind::Creating {
                             // Si el usuario sigue trabajando en otra app mientras crea o hace git push,
