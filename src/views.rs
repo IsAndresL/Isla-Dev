@@ -198,10 +198,9 @@ impl App {
             ),
             (false, false) => format!("{} proyectos", self.cfg.projects.len()),
         };
-        let sub = format!("Mis Proyectos · {counts}");
-        self.header(lx, y, tw, "Isla Dev", &sub, false);
+        self.header(lx, y, tw, "Mis Proyectos", &counts, false);
 
-        let mut cur_y = y + 68.0;
+        let mut cur_y = y + 90.0;
 
         // 1. Barra de Puertos Locales Activos
         if !self.active_ports.is_empty() || !self.active_tasks.is_empty() {
@@ -1411,13 +1410,26 @@ impl App {
             g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
             g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
         } else {
-            g.draw_logo(lx + 16.0, y + 10.0, 44.0, 44.0, 1.0);
-            g.text(title, &g.f.title, lx + 70.0, y + 12.0, tw - 154.0, 22.0, WHITE, 1.0);
-            g.text(sub, &g.f.sub, lx + 70.0, y + 35.0, tw - 154.0, 16.0, GLACIER, 0.95);
-            self.icon_btn(lx + tw - 80.0, y + 18.0, G_GEAR, Hit::Settings);
-            self.icon_btn(lx + tw - 44.0, y + 18.0, G_CLOSE, Hit::Close);
-            g.line(lx + 16.0, y + 62.0, lx + tw - 16.0, y + 62.0, BORDER, 0.85, 1.0);
-            g.line(lx + 16.0, y + 62.0, lx + 60.0, y + 62.0, BRAND_RED, 0.95, 2.0);
+            // Izquierda: Mis Proyectos + conteo
+            g.text(title, &g.f.title, lx + 18.0, y + 18.0, 240.0, 22.0, WHITE, 1.0);
+            g.text(sub, &g.f.sub, lx + 18.0, y + 40.0, 260.0, 17.0, GLACIER, 0.95);
+
+            // Centro: logo protagonista grande + halo + "Isla Dev" debajo
+            let mid_x = lx + tw / 2.0;
+            let logo_s = 52.0;
+            let logo_y = y + 8.0;
+            g.circle(mid_x, logo_y + logo_s / 2.0, 32.0, GLACIER, 0.10);
+            g.circle(mid_x, logo_y + logo_s / 2.0, 28.0, BRAND_RED, 0.22);
+            g.draw_logo(mid_x - logo_s / 2.0, logo_y, logo_s, logo_s, 1.0);
+            g.text("Isla Dev", &g.f.title_c, mid_x - 90.0, y + 61.0, 180.0, 20.0, WHITE, 1.0);
+
+            // Derecha: Ajustes y Cerrar
+            self.icon_btn(lx + tw - 80.0, y + 20.0, G_GEAR, Hit::Settings);
+            self.icon_btn(lx + tw - 44.0, y + 20.0, G_CLOSE, Hit::Close);
+
+            // Línea divisoria con acento centrado bajo Isla Dev
+            g.line(lx + 16.0, y + 84.0, lx + tw - 16.0, y + 84.0, BORDER, 0.85, 1.0);
+            g.line(mid_x - 36.0, y + 84.0, mid_x + 36.0, y + 84.0, BRAND_RED, 0.95, 2.0);
         }
     }
 

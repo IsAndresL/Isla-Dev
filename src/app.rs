@@ -1124,7 +1124,7 @@ impl App {
                 let ports_bar = if self.active_ports.is_empty() && self.active_tasks.is_empty() { 0.0 } else { 32.0 };
                 let search_bar = 42.0;
                 let chips_bar = 56.0;
-                (808.0, 70.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
+                (808.0, 92.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
             View::Settings => (548.0, 64.0 + 84.0 + 10.0 * 44.0 + 34.0, 26.0),
             View::Wizard => {
