@@ -170,6 +170,23 @@ impl IslandPos {
     pub fn is_waterdrop(self) -> bool {
         matches!(self, Self::TopCenter)
     }
+
+    pub fn is_corner(self) -> bool {
+        matches!(
+            self,
+            Self::TopLeft | Self::TopRight | Self::BottomLeft | Self::BottomRight
+        )
+    }
+
+    pub fn corner_id(self) -> u8 {
+        match self {
+            Self::TopLeft => 0,
+            Self::TopRight => 1,
+            Self::BottomLeft => 2,
+            Self::BottomRight => 3,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -937,23 +954,27 @@ impl App {
         (x, y)
     }
 
-    pub(crate) fn panel_origin(&self, w: f32, h: f32) -> (f32, f32) {
-        const EDGE_X: f32 = 12.0;
-        const EDGE_Y: f32 = 10.0;
+    pub(crate) fn panel_origin_ex(&self, w: f32, h: f32, compact: bool) -> (f32, f32) {
+        let edge_x = if compact { 0.0 } else { 12.0 };
+        let edge_y = if compact { 0.0 } else { 8.0 };
         let pos = self.island_pos();
         let x = match pos {
-            IslandPos::TopLeft | IslandPos::BottomLeft => EDGE_X,
+            IslandPos::TopLeft | IslandPos::BottomLeft => edge_x,
             IslandPos::TopCenter | IslandPos::BottomCenter => WIN_W / 2.0 - w / 2.0,
-            IslandPos::TopRight | IslandPos::BottomRight => WIN_W - EDGE_X - w,
+            IslandPos::TopRight | IslandPos::BottomRight => WIN_W - edge_x - w,
         };
         let y = match pos {
             IslandPos::TopCenter => TOP,
-            IslandPos::TopLeft | IslandPos::TopRight => EDGE_Y,
+            IslandPos::TopLeft | IslandPos::TopRight => edge_y,
             IslandPos::BottomLeft | IslandPos::BottomCenter | IslandPos::BottomRight => {
-                WIN_H - EDGE_Y - h
+                WIN_H - edge_y - h
             }
         };
         (x, y)
+    }
+
+    pub(crate) fn panel_origin(&self, w: f32, h: f32) -> (f32, f32) {
+        self.panel_origin_ex(w, h, self.view == View::Compact)
     }
 
     pub(crate) fn compact_dot_positions(
@@ -965,15 +986,30 @@ impl App {
         count: usize,
         dot_r: f32,
     ) -> Vec<(f32, f32)> {
-        if self.island_pos().is_waterdrop() {
+        let pos = self.island_pos();
+        if pos.is_waterdrop() {
             return Self::waterdrop_dot_positions(x + w / 2.0, w, h, count, dot_r);
         }
-        let n = count.clamp(1, 6);
-        let spacing = (dot_r * 2.0 + 4.5).min((w - 14.0) / (n.max(1) as f32));
-        let total_w = (n.saturating_sub(1)) as f32 * spacing;
-        let start_x = x + w / 2.0 - total_w / 2.0;
-        let cy = y + h / 2.0;
-        (0..n).map(|i| (start_x + i as f32 * spacing, cy)).collect()
+        if pos == IslandPos::BottomCenter {
+            let n = count.clamp(1, 6);
+            let spacing = (dot_r * 2.0 + 4.5).min((w - 16.0) / (n.max(1) as f32));
+            let total_w = (n.saturating_sub(1)) as f32 * spacing;
+            let start_x = x + w / 2.0 - total_w / 2.0;
+            let cy = y + h * 0.56;
+            return (0..n).map(|i| (start_x + i as f32 * spacing, cy)).collect();
+        }
+        // 4 Esquinas: si está estirada en hover, puntos a la derecha del mini logo; si en reposo triangular, puntos ordenados en el borde interior
+        let n = count.clamp(1, 4);
+        let is_right = matches!(pos, IslandPos::TopRight | IslandPos::BottomRight);
+        let is_bottom = matches!(pos, IslandPos::BottomLeft | IslandPos::BottomRight);
+        if w > h + 14.0 {
+            let cy = y + h * 0.5;
+            let start_x = if is_right { x + 16.0 } else { x + w - 16.0 - (n - 1) as f32 * 9.0 };
+            return (0..n).map(|i| (start_x + i as f32 * 9.0, cy)).collect();
+        }
+        let cx = if is_right { x + w - 14.0 } else { x + 14.0 };
+        let cy = if is_bottom { y + h - 14.0 } else { y + 14.0 };
+        vec![(cx, cy); 1]
     }
 
     pub(crate) fn filtered_projects(&self) -> Vec<usize> {
@@ -1165,28 +1201,34 @@ impl App {
     pub(crate) fn target(&self) -> (f32, f32, f32) {
         let (w, h, r) = match self.view {
             View::Compact => {
-                if self.island_pos().is_waterdrop() {
-                    if self.hov(Hit::Pill) {
-                        if self.has_live_server() {
-                            (96.0, 24.0, 12.0)
-                        } else {
-                            (78.0, 24.0, 12.0)
-                        }
-                    } else if self.has_live_server() {
+                let pos = self.island_pos();
+                let hov = self.hov(Hit::Pill);
+                let live = self.has_live_server();
+                if pos.is_waterdrop() {
+                    if hov {
+                        if live { (96.0, 24.0, 12.0) } else { (78.0, 24.0, 12.0) }
+                    } else if live {
                         (54.0, 10.0, 5.0)
                     } else {
                         (48.0, 10.0, 5.0)
                     }
-                } else if self.hov(Hit::Pill) {
-                    if self.has_live_server() {
-                        (104.0, 26.0, 13.0)
+                } else if pos == IslandPos::BottomCenter {
+                    if hov {
+                        if live { (116.0, 28.0, 14.0) } else { (108.0, 28.0, 14.0) }
+                    } else if live {
+                        (64.0, 13.0, 6.5)
                     } else {
-                        (88.0, 26.0, 13.0)
+                        (56.0, 12.0, 6.0)
                     }
-                } else if self.has_live_server() {
-                    (64.0, 16.0, 8.0)
                 } else {
-                    (56.0, 14.0, 7.0)
+                    // 4 esquinas: triángulo curvo en reposo -> pestaña esquinera al hacer hover
+                    if hov {
+                        if live { (122.0, 34.0, 14.0) } else { (112.0, 34.0, 14.0) }
+                    } else if live {
+                        (48.0, 48.0, 14.0)
+                    } else {
+                        (44.0, 44.0, 14.0)
+                    }
                 }
             }
             View::Expanded => {

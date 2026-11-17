@@ -13,14 +13,12 @@ impl App {
         let is_waterdrop = pos.is_waterdrop();
         g.alpha.set(1.0);
 
-        let is_compact = self.view == View::Compact && w < 260.0 && h < 42.0;
+        let is_compact = self.view == View::Compact && w < 260.0 && h < 54.0;
 
         if is_compact {
             let glow_t = self.glow_anim.clamp(0.0, 1.0);
             let border_col = if self.has_live_server() {
                 pal.green
-            } else if self.glow_anim > 0.01 {
-                pal.glacier
             } else {
                 pal.glacier
             };
@@ -48,20 +46,47 @@ impl App {
                 if let Some(prog) = self.bg_progress {
                     g.draw_waterdrop_progress(cx, w, h, prog, pal.green);
                 }
-            } else {
-                // Cápsula / píldora flotante para esquinas o borde inferior (#E4002B + Azul Glaciar + Blanco Polar)
+            } else if pos == IslandPos::BottomCenter {
+                // Gota invertida pegada al borde inferior (WIN_H)
+                let cx = x + w / 2.0;
                 if self.glow_anim > 0.01 {
-                    g.rrect_stroke(x - 4.0, y - 4.0, w + 8.0, h + 8.0, r + 4.0, pal.cyan, 0.22 * glow_t, 2.2);
-                    g.rrect_stroke(x - 2.0, y - 2.0, w + 4.0, h + 4.0, r + 2.0, pal.brand_red, 0.42 * glow_t, 1.6);
+                    if let Ok(curve) = g.bottom_drop_path(cx, WIN_H, w, h, false) {
+                        g.stroke_path(&curve, pal.cyan, 0.24 * glow_t, 5.5);
+                        g.stroke_path(&curve, pal.brand_red, 0.45 * glow_t, 3.0);
+                    }
                 }
-                g.rrect(x - 1.5, y + 1.0, w + 3.0, h + 3.0, r + 1.5, pal.shadow, if pal.light { 0.16 } else { 0.52 });
-                g.rrect(x, y, w, h, r, pal.body, 1.0);
-                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, border_col, border_alpha, 1.0);
-                if let Some(prog) = self.bg_progress {
-                    let f = prog.clamp(0.05, 1.0);
-                    g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
-                    g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, pal.green, 0.95, 2.0);
-                    g.unclip();
+                if let Ok(path) = g.bottom_drop_path(cx, WIN_H, w, h, true) {
+                    g.fill_path(&path, pal.body, 1.0);
+                }
+                if let Ok(curve) = g.bottom_drop_path(cx, WIN_H, w, h, false) {
+                    g.stroke_path(&curve, border_col, border_alpha, 1.1);
+                    if let Some(prog) = self.bg_progress {
+                        let f = prog.clamp(0.05, 1.0);
+                        g.clip(cx - w * 0.5 - 2.0, WIN_H - h - 4.0, (w + 4.0) * f, h + 8.0);
+                        g.stroke_path(&curve, pal.green, 0.95, 2.2);
+                        g.unclip();
+                    }
+                }
+            } else {
+                // Triángulo curvo orgánico / pestaña esquinera pegada al rincón exacto
+                let cid = pos.corner_id();
+                if self.glow_anim > 0.01 {
+                    if let Ok(curve) = g.corner_wing_path(cid, x, y, w, h, false) {
+                        g.stroke_path(&curve, pal.cyan, 0.24 * glow_t, 5.8);
+                        g.stroke_path(&curve, pal.brand_red, 0.48 * glow_t, 3.2);
+                    }
+                }
+                if let Ok(path) = g.corner_wing_path(cid, x, y, w, h, true) {
+                    g.fill_path(&path, pal.body, 1.0);
+                }
+                if let Ok(curve) = g.corner_wing_path(cid, x, y, w, h, false) {
+                    g.stroke_path(&curve, border_col, border_alpha, 1.1);
+                    if let Some(prog) = self.bg_progress {
+                        let f = prog.clamp(0.05, 1.0);
+                        g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
+                        g.stroke_path(&curve, pal.green, 0.95, 2.2);
+                        g.unclip();
+                    }
                 }
             }
         } else if is_waterdrop {
@@ -134,25 +159,77 @@ impl App {
         let is_waterdrop = pos.is_waterdrop();
         let srv_count = self.active_server_count();
         let live = srv_count > 0;
-        let expanded_pill = h > 18.0;
+        let expanded_pill = if pos.is_corner() { w > h + 14.0 } else { h > 18.0 };
 
-        if live {
-            let dot_r = if expanded_pill { 3.4 } else { 2.6 };
-            let positions = self.compact_dot_positions(x, y, w, h, srv_count, dot_r);
-            for (dx, dy) in positions {
-                g.circle(dx, dy, dot_r + 1.8, pal.green, 0.25);
-                g.circle(dx, dy, dot_r, pal.green, 1.0);
+        if is_waterdrop {
+            if live {
+                let dot_r = if expanded_pill { 3.4 } else { 2.6 };
+                let positions = self.compact_dot_positions(x, y, w, h, srv_count, dot_r);
+                for (dx, dy) in positions {
+                    g.circle(dx, dy, dot_r + 1.8, pal.green, 0.25);
+                    g.circle(dx, dy, dot_r, pal.green, 1.0);
+                }
+            } else if expanded_pill {
+                g.draw_logo(x + w / 2.0 - 8.0, y + (h - 16.0) / 2.0, 16.0, 16.0, 1.0);
             }
-        } else if !is_waterdrop {
+        } else if pos == IslandPos::BottomCenter {
             if expanded_pill {
-                g.circle(x + 12.0, y + h / 2.0, 3.0, pal.brand_red, 1.0);
-                g.text("Isla Dev", &g.f.badge, x + 21.0, y, w - 26.0, h, pal.white, 0.96);
+                let logo_s = 18.0;
+                g.draw_logo(x + 12.0, y + (h - logo_s) / 2.0 + 1.0, logo_s, logo_s, 1.0);
+                if live {
+                    let dot_r = 3.2;
+                    let n = srv_count.clamp(1, 5);
+                    let start_x = x + 38.0;
+                    let cy = y + h * 0.54;
+                    for i in 0..n {
+                        let dx = start_x + i as f32 * 11.0;
+                        g.circle(dx, cy, dot_r + 1.8, pal.green, 0.25);
+                        g.circle(dx, cy, dot_r, pal.green, 1.0);
+                    }
+                } else {
+                    g.text("Isla Dev", &g.f.badge, x + 32.0, y + 1.0, w - 40.0, h, pal.white, 0.96);
+                }
+            } else if live {
+                let positions = self.compact_dot_positions(x, y, w, h, srv_count, 2.5);
+                for (dx, dy) in positions {
+                    g.circle(dx, dy, 4.2, pal.green, 0.25);
+                    g.circle(dx, dy, 2.5, pal.green, 1.0);
+                }
             } else {
-                g.circle(x + w / 2.0 - 9.0, y + h / 2.0, 2.2, pal.brand_red, 0.95);
-                g.rrect(x + w / 2.0 - 3.0, y + h / 2.0 - 1.5, 13.0, 3.0, 1.5, pal.glacier, 0.85);
+                // Trazo minimalista en rojo marca #E4002B sobre la gota pegada abajo
+                g.rrect(x + w / 2.0 - 11.0, y + h - 5.5, 22.0, 2.6, 1.3, pal.brand_red, 0.92);
             }
-        } else if expanded_pill {
-            g.circle(x + w / 2.0, y + h / 2.0, 2.4, pal.brand_red, 0.95);
+        } else {
+            // 4 Esquinas: triángulo curvo con logo oficial Isla Dev (sin punto+raya)
+            let is_right = matches!(pos, IslandPos::TopRight | IslandPos::BottomRight);
+            let is_bottom = matches!(pos, IslandPos::BottomLeft | IslandPos::BottomRight);
+            if expanded_pill {
+                let logo_s = 20.0;
+                let lx = if is_right { x + w - logo_s - 10.0 } else { x + 10.0 };
+                let ly = y + (h - logo_s) / 2.0;
+                g.draw_logo(lx, ly, logo_s, logo_s, 1.0);
+                if live {
+                    let positions = self.compact_dot_positions(x, y, w, h, srv_count, 3.0);
+                    for (dx, dy) in positions {
+                        g.circle(dx, dy, 4.8, pal.green, 0.25);
+                        g.circle(dx, dy, 3.0, pal.green, 1.0);
+                    }
+                } else {
+                    let tx = if is_right { x + 10.0 } else { x + 32.0 };
+                    g.text("Isla Dev", &g.f.badge, tx, y, w - 42.0, h, pal.white, 0.96);
+                }
+            } else {
+                let logo_s = 18.0;
+                let lx = if is_right { x + w - logo_s - 5.0 } else { x + 5.0 };
+                let ly = if is_bottom { y + h - logo_s - 5.0 } else { y + 5.0 };
+                g.draw_logo(lx, ly, logo_s, logo_s, 1.0);
+                if live {
+                    let dx = if is_right { lx - 4.5 } else { lx + logo_s + 4.5 };
+                    let dy = if is_bottom { ly + 3.0 } else { ly + logo_s - 3.0 };
+                    g.circle(dx, dy, 5.0, pal.green, 0.28);
+                    g.circle(dx, dy, 3.2, pal.green, 1.0);
+                }
+            }
         }
 
         // Superficie con alpha mínimo (1/255, invisible al ojo) para capturar siempre el primer clic/hover.
@@ -165,14 +242,17 @@ impl App {
             g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, pal.body, 0.006);
             g.alpha.set(prev_a);
             self.hit(cx - hit_w / 2.0, 0.0, hit_w, hit_h, Hit::Pill);
-        } else {
-            let hx = x - 4.0;
-            let hy = y - 4.0;
-            let hw = w + 8.0;
-            let hh = h + 8.0;
-            g.rrect(hx, hy, hw, hh, hh / 2.0, pal.body, 0.006);
+        } else if pos == IslandPos::BottomCenter {
+            let cx = x + w / 2.0;
+            let hit_w = if expanded_pill { w.max(108.0) } else { (w + 10.0).max(60.0) };
+            let hit_h = if expanded_pill { h.max(28.0) } else { (h + 4.0).max(15.0) };
+            g.rrect(cx - hit_w / 2.0, WIN_H - hit_h, hit_w, hit_h, 12.0, pal.body, 0.006);
             g.alpha.set(prev_a);
-            self.hit(hx, hy, hw, hh, Hit::Pill);
+            self.hit(cx - hit_w / 2.0, WIN_H - hit_h, hit_w, hit_h, Hit::Pill);
+        } else {
+            g.rrect(x, y, w, h, 8.0, pal.body, 0.006);
+            g.alpha.set(prev_a);
+            self.hit(x, y, w, h, Hit::Pill);
         }
     }
 

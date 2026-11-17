@@ -383,6 +383,140 @@ impl Gfx {
         }
     }
 
+    /// Gota invertida pegada al borde inferior (`bottom_y`) para la posición Abajo · Centro.
+    pub fn bottom_drop_path(
+        &self,
+        cx: f32,
+        bottom_y: f32,
+        w: f32,
+        h: f32,
+        closed: bool,
+    ) -> Result<ID2D1PathGeometry> {
+        unsafe {
+            let path = self.factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            let p0 = D2D_POINT_2F { x: cx - w * 0.5, y: bottom_y };
+            sink.BeginFigure(
+                p0,
+                if closed { D2D1_FIGURE_BEGIN_FILLED } else { D2D1_FIGURE_BEGIN_HOLLOW },
+            );
+
+            let r_cup = (h * 0.46).clamp(7.0, 14.0);
+            let cy = (bottom_y - h + r_cup).min(bottom_y - 4.0);
+            let dy = (bottom_y - cy).max(1.0);
+            let fillet_x = (w * 0.5 - r_cup) * 0.55;
+            let fillet_y = dy * 0.55;
+
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F { x: cx - w * 0.5 + fillet_x, y: bottom_y },
+                point2: D2D_POINT_2F { x: cx - r_cup, y: cy + fillet_y },
+                point3: D2D_POINT_2F { x: cx - r_cup, y: cy },
+            });
+            let k = r_cup * 0.5522847;
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F { x: cx - r_cup, y: cy - k },
+                point2: D2D_POINT_2F { x: cx - k, y: cy - r_cup },
+                point3: D2D_POINT_2F { x: cx, y: cy - r_cup },
+            });
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F { x: cx + k, y: cy - r_cup },
+                point2: D2D_POINT_2F { x: cx + r_cup, y: cy - k },
+                point3: D2D_POINT_2F { x: cx + r_cup, y: cy },
+            });
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F { x: cx + r_cup, y: cy + fillet_y },
+                point2: D2D_POINT_2F { x: cx + w * 0.5 - fillet_x, y: bottom_y },
+                point3: D2D_POINT_2F { x: cx + w * 0.5, y: bottom_y },
+            });
+            if closed {
+                sink.AddLine(p0);
+                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            } else {
+                sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            }
+            sink.Close()?;
+            Ok(path)
+        }
+    }
+
+    /// Aleta / triángulo curvo pegado a una de las 4 esquinas (0=TopLeft, 1=TopRight, 2=BottomLeft, 3=BottomRight).
+    /// En reposo (`w == h`) dibuja un triángulo orgánico curvo; al estirarse en hover (`w > h`) se transforma en pestaña esquinera.
+    pub fn corner_wing_path(
+        &self,
+        corner: u8,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        closed: bool,
+    ) -> Result<ID2D1PathGeometry> {
+        unsafe {
+            let path = self.factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            let is_right = corner == 1 || corner == 3;
+            let is_bottom = corner == 2 || corner == 3;
+            let cx = if is_right { x + w } else { x };
+            let cy = if is_bottom { y + h } else { y };
+            let dx = if is_right { -1.0 } else { 1.0 };
+            let dy = if is_bottom { -1.0 } else { 1.0 };
+
+            let morph = ((w - h) / 48.0).clamp(0.0, 1.0);
+            let lerp = |a: f32, b: f32| a + (b - a) * morph;
+            let r_in = 14.0_f32.min(h * 0.48);
+
+            let p_edge_h = D2D_POINT_2F { x: cx + dx * w, y: cy };
+            let p_turn_start = D2D_POINT_2F {
+                x: cx + dx * w,
+                y: cy + dy * (h - r_in).max(0.0) * morph,
+            };
+            let p_mid = D2D_POINT_2F {
+                x: cx + dx * lerp(w * 0.47, (w - r_in).max(0.0)),
+                y: cy + dy * lerp(h * 0.47, h),
+            };
+            let p_edge_v = D2D_POINT_2F { x: cx, y: cy + dy * h };
+
+            sink.BeginFigure(
+                if morph > 0.01 { p_edge_h } else { p_turn_start },
+                if closed { D2D1_FIGURE_BEGIN_FILLED } else { D2D1_FIGURE_BEGIN_HOLLOW },
+            );
+            if morph > 0.01 {
+                sink.AddLine(p_turn_start);
+            }
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F {
+                    x: cx + dx * lerp(w * 0.72, w),
+                    y: cy + dy * lerp(h * 0.16, (h - r_in * 0.42).max(0.0)),
+                },
+                point2: D2D_POINT_2F {
+                    x: cx + dx * lerp(w * 0.58, (w - r_in * 0.42).max(0.0)),
+                    y: cy + dy * lerp(h * 0.36, h),
+                },
+                point3: p_mid,
+            });
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: D2D_POINT_2F {
+                    x: cx + dx * lerp(w * 0.36, (w - r_in).max(0.0) * 0.55),
+                    y: cy + dy * lerp(h * 0.58, h),
+                },
+                point2: D2D_POINT_2F {
+                    x: cx + dx * lerp(w * 0.16, (w - r_in).max(0.0) * 0.20),
+                    y: cy + dy * lerp(h * 0.72, h),
+                },
+                point3: p_edge_v,
+            });
+
+            if closed {
+                sink.AddLine(D2D_POINT_2F { x: cx, y: cy });
+                sink.AddLine(p_edge_h);
+                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            } else {
+                sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            }
+            sink.Close()?;
+            Ok(path)
+        }
+    }
+
     pub fn top_panel_path(&self, x: f32, w: f32, h: f32, r: f32) -> Result<ID2D1PathGeometry> {
         unsafe {
             let path = self.factory.CreatePathGeometry()?;
