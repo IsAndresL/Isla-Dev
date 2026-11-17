@@ -175,7 +175,7 @@ impl App {
         let g = &self.gfx;
         let srv_count = self.active_server_count();
         let open_count = self.open_windows.len();
-        let sub = match (srv_count > 0, open_count > 0) {
+        let counts = match (srv_count > 0, open_count > 0) {
             (true, true) => format!(
                 "{} proyectos · {} {} · {} {}",
                 self.cfg.projects.len(),
@@ -198,9 +198,10 @@ impl App {
             ),
             (false, false) => format!("{} proyectos", self.cfg.projects.len()),
         };
-        self.header(lx, y, tw, "Mis Proyectos", &sub, false);
+        let sub = format!("Mis Proyectos · {counts}");
+        self.header(lx, y, tw, "Isla Dev", &sub, false);
 
-        let mut cur_y = y + 62.0;
+        let mut cur_y = y + 68.0;
 
         // 1. Barra de Puertos Locales Activos
         if !self.active_ports.is_empty() || !self.active_tasks.is_empty() {
@@ -1404,17 +1405,20 @@ impl App {
         let g = &self.gfx;
         if back {
             self.icon_btn(lx + 16.0, y + 15.0, G_BACK, Hit::Back);
+            g.text(title, &g.f.title, lx + 56.0, y + 13.0, tw - 140.0, 20.0, WHITE, 1.0);
+            g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, GLACIER, 0.92);
+            self.icon_btn(lx + tw - 44.0, y + 15.0, G_CLOSE, Hit::Close);
+            g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
+            g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
         } else {
-            g.draw_logo(lx + 16.0, y + 14.0, 32.0, 32.0, 1.0);
+            g.draw_logo(lx + 16.0, y + 10.0, 44.0, 44.0, 1.0);
+            g.text(title, &g.f.title, lx + 70.0, y + 12.0, tw - 154.0, 22.0, WHITE, 1.0);
+            g.text(sub, &g.f.sub, lx + 70.0, y + 35.0, tw - 154.0, 16.0, GLACIER, 0.95);
+            self.icon_btn(lx + tw - 80.0, y + 18.0, G_GEAR, Hit::Settings);
+            self.icon_btn(lx + tw - 44.0, y + 18.0, G_CLOSE, Hit::Close);
+            g.line(lx + 16.0, y + 62.0, lx + tw - 16.0, y + 62.0, BORDER, 0.85, 1.0);
+            g.line(lx + 16.0, y + 62.0, lx + 60.0, y + 62.0, BRAND_RED, 0.95, 2.0);
         }
-        g.text(title, &g.f.title, lx + 56.0, y + 13.0, tw - 140.0, 20.0, WHITE, 1.0);
-        g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, GLACIER, 0.92);
-        if !back {
-            self.icon_btn(lx + tw - 80.0, y + 15.0, G_GEAR, Hit::Settings);
-        }
-        self.icon_btn(lx + tw - 44.0, y + 15.0, G_CLOSE, Hit::Close);
-        g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
-        g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
     }
 
     pub(crate) fn icon_btn(&self, x: f32, y: f32, glyph: &str, id: Hit) {
