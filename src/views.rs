@@ -1728,9 +1728,34 @@ impl App {
             (hy + 32.0).min(win_y + win_h - th - 6.0)
         };
 
-        g.rrect(tx - 1.0, ty + 1.5, tw + 2.0, th + 1.0, 6.0, 0x000000, 0.7);
-        g.rrect(tx, ty, tw, th, 6.0, 0x18181B, 0.98);
-        g.rrect_stroke(tx + 0.5, ty + 0.5, tw - 1.0, th - 1.0, 6.0, pal.white, 0.28, 1.0);
+        g.rrect(
+            tx - 1.0,
+            ty + 1.5,
+            tw + 2.0,
+            th + 1.0,
+            6.0,
+            pal.shadow,
+            if pal.light { 0.16 } else { 0.7 },
+        );
+        g.rrect(
+            tx,
+            ty,
+            tw,
+            th,
+            6.0,
+            if pal.light { pal.card } else { 0x18181B },
+            0.99,
+        );
+        g.rrect_stroke(
+            tx + 0.5,
+            ty + 0.5,
+            tw - 1.0,
+            th - 1.0,
+            6.0,
+            if pal.light { pal.glacier } else { pal.white },
+            if pal.light { 0.75 } else { 0.28 },
+            1.0,
+        );
         g.text(&txt, &g.f.tiny_c, tx + 6.0, ty, tw - 12.0, th, pal.white, 0.98);
     }
 }
