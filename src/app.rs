@@ -88,6 +88,64 @@ pub enum ServerRole {
     Both,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IslandPos {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+impl IslandPos {
+    pub const ALL: [IslandPos; 6] = [
+        IslandPos::TopLeft,
+        IslandPos::TopCenter,
+        IslandPos::TopRight,
+        IslandPos::BottomLeft,
+        IslandPos::BottomCenter,
+        IslandPos::BottomRight,
+    ];
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "top_left" => Self::TopLeft,
+            "top_right" => Self::TopRight,
+            "bottom_left" => Self::BottomLeft,
+            "bottom_center" => Self::BottomCenter,
+            "bottom_right" => Self::BottomRight,
+            _ => Self::TopCenter,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TopLeft => "top_left",
+            Self::TopCenter => "top_center",
+            Self::TopRight => "top_right",
+            Self::BottomLeft => "bottom_left",
+            Self::BottomCenter => "bottom_center",
+            Self::BottomRight => "bottom_right",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TopLeft => "Arriba · Izquierda",
+            Self::TopCenter => "Arriba · Centro (Gota)",
+            Self::TopRight => "Arriba · Derecha",
+            Self::BottomLeft => "Abajo · Izquierda",
+            Self::BottomCenter => "Abajo · Centro",
+            Self::BottomRight => "Abajo · Derecha",
+        }
+    }
+
+    pub fn is_waterdrop(self) -> bool {
+        matches!(self, Self::TopCenter)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Hit {
     Pill,
@@ -134,6 +192,7 @@ pub enum Hit {
     ToggleFullscreenHide,
     ToggleSounds,
     CycleMonitor,
+    SetPosition(IslandPos),
     Startup,
     DefaultLauncher,
     BaseDir,
@@ -550,7 +609,7 @@ impl App {
         unsafe {
             DragAcceptFiles(self.hwnd, true);
             SetTimer(self.hwnd, TIMER_POLL, 4500, None);
-            SetTimer(self.hwnd, TIMER_TOPMOST, 1500, None);
+            SetTimer(self.hwnd, TIMER_TOPMOST, 900, None);
         }
         self.kick();
     }
@@ -625,11 +684,9 @@ impl App {
         actions::scan_open_ports(extra_ports, self.tx.clone(), hw);
     }
 
-    fn poll_periodic(&mut self) {
-        // 1. Verificar auto-ocultamiento en pantalla completa y soporte multi-monitor
-        let mon_rc = actions::target_monitor_rect(&self.cfg.monitor_mode);
-        let new_x = mon_rc.left + ((mon_rc.right - mon_rc.left) - self.gfx.wpx) / 2;
-        let new_y = mon_rc.top;
+    fn update_fullscreen_and_pos(&mut self) {
+        let (mon_rc, work_rc) = actions::target_monitor_rects(&self.cfg.monitor_mode);
+        let (new_x, new_y) = self.desired_window_pos(mon_rc, work_rc);
         if (new_x, new_y) != self.pos {
             self.pos = (new_x, new_y);
             unsafe {
@@ -667,12 +724,15 @@ impl App {
             }
         }
 
-        // Mantener la isla siempre visible por encima de la barra de tareas y bandeja del sistema
         if self.visible && !self.auto_hidden_fs {
             actions::ensure_island_above_taskbar(self.hwnd);
         }
+    }
 
-        // 2. Solo si el panel está abierto, sincronizar carpetas borradas y ventanas abiertas
+    fn poll_periodic(&mut self) {
+        self.update_fullscreen_and_pos();
+
+        // Solo si el panel está abierto, sincronizar carpetas borradas y ventanas abiertas
         if self.view == View::Expanded {
             let scanned = actions::scan_base_dir(Path::new(&self.cfg.base_dir));
             if self.cfg.sync_scanned_projects(scanned) {
@@ -781,6 +841,68 @@ impl App {
             .collect()
     }
 
+    pub(crate) fn island_pos(&self) -> IslandPos {
+        IslandPos::from_str(&self.cfg.position)
+    }
+
+    pub(crate) fn desired_window_pos(&self, mon_rc: RECT, work_rc: RECT) -> (i32, i32) {
+        let pos = self.island_pos();
+        let x = match pos {
+            IslandPos::TopLeft | IslandPos::BottomLeft => work_rc.left,
+            IslandPos::TopCenter | IslandPos::BottomCenter => {
+                mon_rc.left + ((mon_rc.right - mon_rc.left) - self.gfx.wpx) / 2
+            }
+            IslandPos::TopRight | IslandPos::BottomRight => work_rc.right - self.gfx.wpx,
+        };
+        let y = match pos {
+            IslandPos::TopCenter => mon_rc.top,
+            IslandPos::TopLeft | IslandPos::TopRight => work_rc.top,
+            IslandPos::BottomLeft | IslandPos::BottomCenter | IslandPos::BottomRight => {
+                work_rc.bottom - self.gfx.hpx
+            }
+        };
+        (x, y)
+    }
+
+    pub(crate) fn panel_origin(&self, w: f32, h: f32) -> (f32, f32) {
+        const EDGE_X: f32 = 12.0;
+        const EDGE_Y: f32 = 10.0;
+        let pos = self.island_pos();
+        let x = match pos {
+            IslandPos::TopLeft | IslandPos::BottomLeft => EDGE_X,
+            IslandPos::TopCenter | IslandPos::BottomCenter => WIN_W / 2.0 - w / 2.0,
+            IslandPos::TopRight | IslandPos::BottomRight => WIN_W - EDGE_X - w,
+        };
+        let y = match pos {
+            IslandPos::TopCenter => TOP,
+            IslandPos::TopLeft | IslandPos::TopRight => EDGE_Y,
+            IslandPos::BottomLeft | IslandPos::BottomCenter | IslandPos::BottomRight => {
+                WIN_H - EDGE_Y - h
+            }
+        };
+        (x, y)
+    }
+
+    pub(crate) fn compact_dot_positions(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        count: usize,
+        dot_r: f32,
+    ) -> Vec<(f32, f32)> {
+        if self.island_pos().is_waterdrop() {
+            return Self::waterdrop_dot_positions(x + w / 2.0, w, h, count, dot_r);
+        }
+        let n = count.clamp(1, 6);
+        let spacing = (dot_r * 2.0 + 4.5).min((w - 14.0) / (n.max(1) as f32));
+        let total_w = (n.saturating_sub(1)) as f32 * spacing;
+        let start_x = x + w / 2.0 - total_w / 2.0;
+        let cy = y + h / 2.0;
+        (0..n).map(|i| (start_x + i as f32 * spacing, cy)).collect()
+    }
+
     pub(crate) fn filtered_projects(&self) -> Vec<usize> {
         let q = self.search.trim().to_lowercase();
         self.cfg
@@ -844,11 +966,13 @@ impl App {
     // ---------- ventana / sistema ----------
 
     pub(crate) fn reposition(&mut self) {
-        let mon_rc = actions::target_monitor_rect(&self.cfg.monitor_mode);
-        self.pos = (
-            mon_rc.left + ((mon_rc.right - mon_rc.left) - self.gfx.wpx) / 2,
-            mon_rc.top,
-        );
+        let (mon_rc, work_rc) = actions::target_monitor_rects(&self.cfg.monitor_mode);
+        self.pos = self.desired_window_pos(mon_rc, work_rc);
+        let flags = if self.visible && !self.auto_hidden_fs {
+            SWP_NOACTIVATE | SWP_SHOWWINDOW
+        } else {
+            SWP_NOACTIVATE
+        };
         unsafe {
             let _ = SetWindowPos(
                 self.hwnd,
@@ -857,7 +981,7 @@ impl App {
                 self.pos.1,
                 self.gfx.wpx,
                 self.gfx.hpx,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                flags,
             );
         }
     }
@@ -968,16 +1092,28 @@ impl App {
     pub(crate) fn target(&self) -> (f32, f32, f32) {
         let (w, h, r) = match self.view {
             View::Compact => {
-                if self.hov(Hit::Pill) {
-                    if self.has_live_server() {
-                        (96.0, 24.0, 12.0)
+                if self.island_pos().is_waterdrop() {
+                    if self.hov(Hit::Pill) {
+                        if self.has_live_server() {
+                            (96.0, 24.0, 12.0)
+                        } else {
+                            (78.0, 24.0, 12.0)
+                        }
+                    } else if self.has_live_server() {
+                        (54.0, 10.0, 5.0)
                     } else {
-                        (78.0, 24.0, 12.0)
+                        (48.0, 10.0, 5.0)
+                    }
+                } else if self.hov(Hit::Pill) {
+                    if self.has_live_server() {
+                        (104.0, 26.0, 13.0)
+                    } else {
+                        (88.0, 26.0, 13.0)
                     }
                 } else if self.has_live_server() {
-                    (54.0, 10.0, 5.0)
+                    (64.0, 16.0, 8.0)
                 } else {
-                    (48.0, 10.0, 5.0)
+                    (56.0, 14.0, 7.0)
                 }
             }
             View::Expanded => {
@@ -988,7 +1124,7 @@ impl App {
                 let chips_bar = 56.0;
                 (808.0, 64.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
-            View::Settings => (548.0, 64.0 + 10.0 * 48.0 + 38.0, 26.0),
+            View::Settings => (548.0, 64.0 + 84.0 + 10.0 * 44.0 + 34.0, 26.0),
             View::Wizard => {
                 let rows = match self.step {
                     Step::Name => self.cfg.templates.len().min(5) as f32 * 46.0 + 118.0,
@@ -2308,6 +2444,13 @@ impl App {
                 self.reposition();
                 self.kick();
             }
+            Hit::SetPosition(pos) => {
+                self.cfg.position = pos.as_str().into();
+                self.save();
+                self.reposition();
+                actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                self.kick();
+            }
             Hit::Startup => {
                 self.startup = !self.startup;
                 actions::set_startup(self.startup);
@@ -3268,6 +3411,23 @@ impl App {
             let _ = AppendMenuW(menu, MF_STRING, 2, w!("Nuevo proyecto"));
             let _ = AppendMenuW(menu, MF_STRING, 6, w!("Personalizar (Programas y Librerías)"));
             let _ = AppendMenuW(menu, MF_STRING, 3, w!("Ajustes"));
+            if let Ok(pos_sub) = CreatePopupMenu() {
+                let cur_pos = self.island_pos();
+                for (pi, pos) in IslandPos::ALL.iter().enumerate() {
+                    let flags = if *pos == cur_pos {
+                        MF_STRING | MF_CHECKED
+                    } else {
+                        MF_STRING
+                    };
+                    let _ = AppendMenuW(pos_sub, flags, 20 + pi, &HSTRING::from(pos.label()));
+                }
+                let _ = AppendMenuW(
+                    menu,
+                    MF_POPUP,
+                    pos_sub.0 as usize,
+                    w!("Posición en pantalla"),
+                );
+            }
             let _ = AppendMenuW(
                 menu,
                 MF_STRING,
@@ -3314,6 +3474,11 @@ impl App {
                 }
                 4 => self.set_visible(!self.visible),
                 5 => self.quit(),
+                c if (20..26).contains(&c) => {
+                    if let Some(&pos) = IslandPos::ALL.get((c - 20) as usize) {
+                        self.click(Hit::SetPosition(pos));
+                    }
+                }
                 _ => {}
             }
         }
@@ -3827,9 +3992,7 @@ impl App {
                     } else if wp.0 == TIMER_POLL {
                         self.poll_periodic();
                     } else if wp.0 == TIMER_TOPMOST {
-                        if self.visible && !self.auto_hidden_fs {
-                            actions::ensure_island_above_taskbar(self.hwnd);
-                        }
+                        self.update_fullscreen_and_pos();
                     } else if wp.0 == TIMER_CONSOLE && self.view == View::ConsoleModal {
                         if self.refresh_console_lines() {
                             self.kick();

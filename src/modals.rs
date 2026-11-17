@@ -99,13 +99,72 @@ impl App {
             ),
         ];
 
-        let mut ry = y + 64.0;
+        // Selector visual interactivo de posición en pantalla (6 ubicaciones)
+        let cur_pos = self.island_pos();
+        let px = lx + 16.0;
+        let py = y + 64.0;
+        let pw = tw - 32.0;
+        let ph = 76.0;
+        g.rrect(px, py, pw, ph, 12.0, WHITE, 0.04);
+        g.rrect_stroke(px, py, pw, ph, 12.0, WHITE, 0.10, 1.0);
+        g.text("Posición en pantalla", &g.f.body, px + 14.0, py + 9.0, 290.0, 19.0, WHITE, 1.0);
+        g.text(cur_pos.label(), &g.f.sub, px + 14.0, py + 29.0, 290.0, 17.0, CYAN, 1.0);
+        g.text(
+            "Siempre visible · Se oculta en fullscreen",
+            &g.f.tiny,
+            px + 14.0,
+            py + 48.0,
+            290.0,
+            16.0,
+            GRAY,
+            0.95,
+        );
+
+        let mx = px + pw - 196.0;
+        let my = py + 8.0;
+        let mw = 182.0;
+        let mh = 60.0;
+        g.rrect(mx, my, mw, mh, 9.0, 0x090D16, 0.95);
+        g.rrect_stroke(mx, my, mw, mh, 9.0, WHITE, 0.16, 1.0);
+        g.rrect(mx + 8.0, my + mh - 5.0, mw - 16.0, 2.5, 1.2, WHITE, 0.12);
+
+        let spots: [(IslandPos, &str, f32, f32); 6] = [
+            (IslandPos::TopLeft, "Izq", mx + 7.0, my + 6.0),
+            (IslandPos::TopCenter, "Gota", mx + mw / 2.0 - 22.0, my + 6.0),
+            (IslandPos::TopRight, "Der", mx + mw - 51.0, my + 6.0),
+            (IslandPos::BottomLeft, "Izq", mx + 7.0, my + mh - 25.0),
+            (IslandPos::BottomCenter, "Cen", mx + mw / 2.0 - 22.0, my + mh - 25.0),
+            (IslandPos::BottomRight, "Der", mx + mw - 51.0, my + mh - 25.0),
+        ];
+        for (spot, lbl, sx, sy) in spots {
+            let active = cur_pos == spot;
+            let hov = self.hov(Hit::SetPosition(spot));
+            let bg = if active { CYAN } else { WHITE };
+            let ba = if active { 0.85 } else if hov { 0.22 } else { 0.08 };
+            let bc = if active { WHITE } else { WHITE };
+            let bca = if active { 0.85 } else if hov { 0.45 } else { 0.16 };
+            g.rrect(sx, sy, 44.0, 16.0, 8.0, bg, ba);
+            g.rrect_stroke(sx, sy, 44.0, 16.0, 8.0, bc, bca, 1.0);
+            g.text(
+                lbl,
+                &g.f.tiny_c,
+                sx,
+                sy,
+                44.0,
+                16.0,
+                if active || hov { WHITE } else { GRAY },
+                1.0,
+            );
+            self.hit(sx, sy, 44.0, 16.0, Hit::SetPosition(spot));
+        }
+
+        let mut ry = y + 64.0 + 84.0;
         for (id, icon, label, sub, toggle) in items {
             let quit = id == Hit::Quit;
-            self.row_bg(lx + 16.0, ry, tw - 32.0, 42.0, id, false);
+            self.row_bg(lx + 16.0, ry, tw - 32.0, 40.0, id, false);
             g.rrect(
                 lx + 24.0,
-                ry + 6.0,
+                ry + 5.0,
                 30.0,
                 30.0,
                 9.0,
@@ -116,7 +175,7 @@ impl App {
                 icon,
                 &g.f.icon,
                 lx + 24.0,
-                ry + 6.0,
+                ry + 5.0,
                 30.0,
                 30.0,
                 if quit { RED } else { WHITE },
@@ -126,19 +185,19 @@ impl App {
                 &label,
                 &g.f.body,
                 lx + 64.0,
-                ry + 3.0,
+                ry + 2.0,
                 tw - 150.0,
                 19.0,
                 if quit { RED } else { WHITE },
                 1.0,
             );
-            g.text(&sub, &g.f.sub, lx + 64.0, ry + 21.0, tw - 150.0, 16.0, GRAY, 1.0);
+            g.text(&sub, &g.f.sub, lx + 64.0, ry + 20.0, tw - 150.0, 16.0, GRAY, 1.0);
             if let Some(on) = toggle {
-                self.toggle_pill(lx + tw - 66.0, ry + 11.0, on);
+                self.toggle_pill(lx + tw - 66.0, ry + 10.0, on);
             } else if !quit {
-                g.text(G_CHEV, &g.f.icon_sm, lx + tw - 48.0, ry + 9.0, 24.0, 24.0, DIM, 1.0);
+                g.text(G_CHEV, &g.f.icon_sm, lx + tw - 48.0, ry + 8.0, 24.0, 24.0, DIM, 1.0);
             }
-            ry += 48.0;
+            ry += 44.0;
         }
 
         // Pie de firma solicitado por el usuario + acceso opcional a config.toml

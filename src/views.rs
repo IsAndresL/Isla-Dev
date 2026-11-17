@@ -6,42 +6,65 @@ impl App {
     pub(crate) fn draw(&self) {
         let g = &self.gfx;
         let (w, h, r) = (self.sw.x.max(30.0), self.sh.x.max(8.0), self.sr.x.max(3.0));
-        let cx = WIN_W / 2.0;
-        let y = TOP;
+        let (x, y) = self.panel_origin(w, h);
+        let pos = self.island_pos();
+        let is_waterdrop = pos.is_waterdrop();
         g.alpha.set(1.0);
 
         let is_compact = self.view == View::Compact && w < 260.0 && h < 42.0;
 
         if is_compact {
             let glow_t = self.glow_anim.clamp(0.0, 1.0);
-            if self.glow_anim > 0.01 {
-                g.draw_glow_ring(cx, w, h, glow_t);
-            }
-            if let Ok(path) = g.waterdrop_path(cx, w, h) {
-                g.fill_path(&path, BODY, 1.0);
-            }
-            if let Ok(curve) = g.waterdrop_curve_path(cx, w, h) {
-                let border_col = if self.has_live_server() {
-                    GREEN
-                } else {
-                    WHITE
-                };
-                let border_alpha = if self.glow_anim > 0.01 {
-                    0.28 + 0.25 * glow_t
-                } else if self.has_live_server() {
-                    0.35
-                } else {
-                    0.15
-                };
-                g.stroke_path(&curve, border_col, border_alpha, 1.0);
-            }
+            let border_col = if self.has_live_server() { GREEN } else { WHITE };
+            let border_alpha = if self.glow_anim > 0.01 {
+                0.28 + 0.25 * glow_t
+            } else if self.has_live_server() {
+                0.35
+            } else {
+                0.15
+            };
 
-            // Barra de progreso luminosa en el borde inferior curvo de la gota (cuando crea/clona/sube en 2do plano)
-            if let Some(prog) = self.bg_progress {
-                g.draw_waterdrop_progress(cx, w, h, prog, GREEN);
+            if is_waterdrop {
+                let cx = x + w / 2.0;
+                if self.glow_anim > 0.01 {
+                    g.draw_glow_ring(cx, w, h, glow_t);
+                }
+                if let Ok(path) = g.waterdrop_path(cx, w, h) {
+                    g.fill_path(&path, BODY, 1.0);
+                }
+                if let Ok(curve) = g.waterdrop_curve_path(cx, w, h) {
+                    g.stroke_path(&curve, border_col, border_alpha, 1.0);
+                }
+                if let Some(prog) = self.bg_progress {
+                    g.draw_waterdrop_progress(cx, w, h, prog, GREEN);
+                }
+            } else {
+                // Cápsula / píldora flotante para esquinas o borde inferior
+                if self.glow_anim > 0.01 {
+                    for (pad, a) in [(4.0, 0.14 * glow_t), (2.0, 0.24 * glow_t)] {
+                        g.rrect_stroke(
+                            x - pad,
+                            y - pad,
+                            w + pad * 2.0,
+                            h + pad * 2.0,
+                            r + pad,
+                            CYAN,
+                            a,
+                            2.0,
+                        );
+                    }
+                }
+                g.rrect(x - 1.5, y + 1.0, w + 3.0, h + 3.0, r + 1.5, 0x000000, 0.52);
+                g.rrect(x, y, w, h, r, BODY, 1.0);
+                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, border_col, border_alpha, 1.0);
+                if let Some(prog) = self.bg_progress {
+                    let f = prog.clamp(0.05, 1.0);
+                    g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
+                    g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.95, 2.0);
+                    g.unclip();
+                }
             }
-        } else {
-            let x = cx - w / 2.0;
+        } else if is_waterdrop {
             if let Ok(shadow) = g.top_panel_path(x - 2.0, w + 4.0, h + 3.0, r + 2.0) {
                 g.fill_path(&shadow, 0x000000, 0.55);
             }
@@ -52,72 +75,101 @@ impl App {
                 g.stroke_path(&border, WHITE, 0.14, 1.0);
                 if let Some(prog) = self.bg_progress {
                     let f = prog.clamp(0.05, 1.0);
-                    g.clip(x - 2.0, 0.0, (w + 4.0) * f, h + 6.0);
+                    g.clip(x - 2.0, y, (w + 4.0) * f, h + 6.0);
                     g.stroke_path(&border, GREEN, 0.30, 4.5);
                     g.stroke_path(&border, GREEN, 0.95, 2.0);
                     g.unclip();
                 }
             }
+        } else {
+            // Panel flotante con las 4 esquinas redondeadas para esquinas y zona inferior
+            g.rrect(x - 2.0, y - 1.0, w + 4.0, h + 5.0, r + 2.0, 0x000000, 0.55);
+            g.rrect(x, y, w, h, r, BODY, 0.99);
+            g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, WHITE, 0.14, 1.0);
+            if let Some(prog) = self.bg_progress {
+                let f = prog.clamp(0.05, 1.0);
+                g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
+                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.30, 4.5);
+                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.95, 2.0);
+                g.unclip();
+            }
         }
 
         let (tw, th, _) = self.target();
-        let lx = cx - tw / 2.0;
+        let (lx, ly) = self.panel_origin(tw, th);
         let a = self.sa.x.clamp(0.0, 1.0);
         g.alpha.set(a);
 
-        let clip_x = cx - w / 2.0;
         let clipped = !is_compact;
         if clipped {
-            g.clip(clip_x, y, w, h);
+            g.clip(x, y, w, h);
         }
         match self.view {
-            View::Compact => self.draw_compact(cx, y, w, h),
-            View::Expanded => self.draw_expanded(lx, y, tw),
-            View::Settings => self.draw_settings(lx, y, tw),
-            View::Wizard => self.draw_wizard(lx, y, tw),
-            View::GitModal => self.draw_git_modal(lx, y, tw),
-            View::NoteModal => self.draw_note_modal(lx, y, tw),
-            View::WorkspaceModal => self.draw_workspace_modal(lx, y, tw),
-            View::CustomEditor => self.draw_custom_editor(lx, y, tw),
-            View::EnvModal => self.draw_env_modal(lx, y, tw),
-            View::CleanerModal => self.draw_cleaner_modal(lx, y, tw),
-            View::ConsoleModal => self.draw_console_modal(lx, y, tw),
-            View::RunnerModal => self.draw_runner_modal(lx, y, tw),
-            View::Status => self.draw_status(lx, y, tw, th),
+            View::Compact => self.draw_compact(x, y, w, h),
+            View::Expanded => self.draw_expanded(lx, ly, tw),
+            View::Settings => self.draw_settings(lx, ly, tw),
+            View::Wizard => self.draw_wizard(lx, ly, tw),
+            View::GitModal => self.draw_git_modal(lx, ly, tw),
+            View::NoteModal => self.draw_note_modal(lx, ly, tw),
+            View::WorkspaceModal => self.draw_workspace_modal(lx, ly, tw),
+            View::CustomEditor => self.draw_custom_editor(lx, ly, tw),
+            View::EnvModal => self.draw_env_modal(lx, ly, tw),
+            View::CleanerModal => self.draw_cleaner_modal(lx, ly, tw),
+            View::ConsoleModal => self.draw_console_modal(lx, ly, tw),
+            View::RunnerModal => self.draw_runner_modal(lx, ly, tw),
+            View::Status => self.draw_status(lx, ly, tw, th),
         }
         if self.view != View::Compact {
-            self.draw_tooltip(cx - w / 2.0, y, w, h);
+            self.draw_tooltip(x, y, w, h);
         }
         if clipped {
             g.unclip();
         }
     }
 
-    pub(crate) fn draw_compact(&self, cx: f32, y: f32, w: f32, h: f32) {
+    pub(crate) fn draw_compact(&self, x: f32, y: f32, w: f32, h: f32) {
         let g = &self.gfx;
+        let pos = self.island_pos();
+        let is_waterdrop = pos.is_waterdrop();
         let srv_count = self.active_server_count();
         let live = srv_count > 0;
-        let expanded_pill = h > 16.0;
+        let expanded_pill = h > 18.0;
 
         if live {
             let dot_r = if expanded_pill { 3.4 } else { 2.6 };
-            let positions = Self::waterdrop_dot_positions(cx, w, h, srv_count, dot_r);
+            let positions = self.compact_dot_positions(x, y, w, h, srv_count, dot_r);
             for (dx, dy) in positions {
-                g.circle(dx, y + dy, dot_r + 1.8, GREEN, 0.25);
-                g.circle(dx, y + dy, dot_r, GREEN, 1.0);
+                g.circle(dx, dy, dot_r + 1.8, GREEN, 0.25);
+                g.circle(dx, dy, dot_r, GREEN, 1.0);
+            }
+        } else if !is_waterdrop {
+            if expanded_pill {
+                g.text(G_TERM, &g.f.icon_xs, x + 14.0, y, 16.0, h, CYAN, 0.95);
+                g.text("Isla Dev", &g.f.tiny, x + 32.0, y, w - 38.0, h, WHITE, 0.9);
+            } else {
+                g.rrect(x + w / 2.0 - 8.0, y + h / 2.0 - 1.5, 16.0, 3.0, 1.5, WHITE, 0.35);
             }
         }
 
-        // Superficie con alpha mínimo (1/255, invisible al ojo) para que Windows (UpdateLayeredWindow)
-        // capture siempre el primer clic/hover en la zona de la gota sin dejar pasar el clic al fondo.
-        // En reposo se ajusta exactamente al tamaño compacto visible para no invadir pestañas ni otras ventanas.
-        let hit_w = if expanded_pill { w.max(88.0) } else { (w + 10.0).max(56.0) };
-        let hit_h = if expanded_pill { h.max(24.0) } else { (h + 4.0).max(14.0) };
+        // Superficie con alpha mínimo (1/255, invisible al ojo) para capturar siempre el primer clic/hover.
         let prev_a = g.alpha.get();
         g.alpha.set(1.0);
-        g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, BODY, 0.006);
-        g.alpha.set(prev_a);
-        self.hit(cx - hit_w / 2.0, 0.0, hit_w, hit_h, Hit::Pill);
+        if is_waterdrop {
+            let cx = x + w / 2.0;
+            let hit_w = if expanded_pill { w.max(88.0) } else { (w + 10.0).max(56.0) };
+            let hit_h = if expanded_pill { h.max(24.0) } else { (h + 4.0).max(14.0) };
+            g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, BODY, 0.006);
+            g.alpha.set(prev_a);
+            self.hit(cx - hit_w / 2.0, 0.0, hit_w, hit_h, Hit::Pill);
+        } else {
+            let hx = x - 4.0;
+            let hy = y - 4.0;
+            let hw = w + 8.0;
+            let hh = h + 8.0;
+            g.rrect(hx, hy, hw, hh, hh / 2.0, BODY, 0.006);
+            g.alpha.set(prev_a);
+            self.hit(hx, hy, hw, hh, Hit::Pill);
+        }
     }
 
     pub(crate) fn draw_expanded(&self, lx: f32, y: f32, tw: f32) {
@@ -1600,6 +1652,7 @@ impl App {
             }
             Hit::OpenWinFocus(_) => Some("Saltar a la ventana ya abierta de este proyecto".into()),
             Hit::OpenWinClose(_) => Some("Cerrar la ventana de este proyecto".into()),
+            Hit::SetPosition(p) => Some(format!("Mover la isla a: {}", p.label())),
             _ => None,
         };
         let Some(txt) = label else { return };

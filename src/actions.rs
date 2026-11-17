@@ -1666,16 +1666,16 @@ pub fn pick_exe_file(hwnd: HWND, title: &str) -> Option<PathBuf> {
     }
 }
 
-/// Enumera los monitores conectados devolviendo sus rectángulos de pantalla completa.
-pub fn list_monitors() -> Vec<RECT> {
+/// Enumera los monitores conectados devolviendo pares `(rcMonitor, rcWork)`.
+pub fn list_monitors_info() -> Vec<(RECT, RECT)> {
     unsafe extern "system" fn mon_enum(hmon: HMONITOR, _hdc: HDC, _rc: *mut RECT, lparam: LPARAM) -> BOOL {
-        let vec = &mut *(lparam.0 as *mut Vec<RECT>);
+        let vec = &mut *(lparam.0 as *mut Vec<(RECT, RECT)>);
         let mut mi = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..Default::default()
         };
         if GetMonitorInfoW(hmon, &mut mi).as_bool() {
-            vec.push(mi.rcMonitor);
+            vec.push((mi.rcMonitor, mi.rcWork));
         }
         BOOL(1)
     }
@@ -1686,18 +1686,24 @@ pub fn list_monitors() -> Vec<RECT> {
     if list.is_empty() {
         let sw = unsafe { GetSystemMetrics(SM_CXSCREEN) };
         let sh = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-        list.push(RECT {
+        let rc = RECT {
             left: 0,
             top: 0,
             right: sw,
             bottom: sh,
-        });
+        };
+        list.push((rc, rc));
     }
     list
 }
 
-/// Devuelve el rectángulo del monitor objetivo según `monitor_mode` ("primary", "cursor", "monitor:0", etc.).
-pub fn target_monitor_rect(mode: &str) -> RECT {
+/// Enumera los monitores conectados devolviendo sus rectángulos de pantalla completa.
+pub fn list_monitors() -> Vec<RECT> {
+    list_monitors_info().into_iter().map(|(m, _)| m).collect()
+}
+
+/// Devuelve `(rcMonitor, rcWork)` del monitor objetivo según `monitor_mode` ("primary", "cursor", "monitor:0", etc.).
+pub fn target_monitor_rects(mode: &str) -> (RECT, RECT) {
     if mode == "cursor" {
         unsafe {
             let mut pt = POINT::default();
@@ -1708,28 +1714,43 @@ pub fn target_monitor_rect(mode: &str) -> RECT {
                     ..Default::default()
                 };
                 if GetMonitorInfoW(hmon, &mut mi).as_bool() {
-                    return mi.rcMonitor;
+                    return (mi.rcMonitor, mi.rcWork);
                 }
             }
         }
     } else if let Some(idx_str) = mode.strip_prefix("monitor:") {
         if let Ok(idx) = idx_str.parse::<usize>() {
-            let mons = list_monitors();
-            if let Some(&rc) = mons.get(idx) {
-                return rc;
+            let mons = list_monitors_info();
+            if let Some(&pair) = mons.get(idx) {
+                return pair;
             }
         }
     }
     unsafe {
+        let hmon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            return (mi.rcMonitor, mi.rcWork);
+        }
         let sw = GetSystemMetrics(SM_CXSCREEN);
         let sh = GetSystemMetrics(SM_CYSCREEN);
-        RECT {
+        let rc = RECT {
             left: 0,
             top: 0,
             right: sw,
             bottom: sh,
-        }
+        };
+        (rc, rc)
     }
+}
+
+/// Devuelve el rectángulo del monitor objetivo según `monitor_mode` ("primary", "cursor", "monitor:0", etc.).
+#[allow(dead_code)]
+pub fn target_monitor_rect(mode: &str) -> RECT {
+    target_monitor_rects(mode).0
 }
 
 /// Muestra un cuadro de confirmación nativo de Windows antes de eliminar por completo la carpeta de un proyecto del disco.

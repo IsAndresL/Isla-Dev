@@ -15,6 +15,8 @@ pub struct Config {
     pub hide_on_fullscreen: bool,
     #[serde(default = "d_monitor")]
     pub monitor_mode: String,
+    #[serde(default = "d_position")]
+    pub position: String,
     #[serde(default = "d_true")]
     pub sounds_enabled: bool,
     #[serde(default = "d_workspaces")]
@@ -61,6 +63,10 @@ fn d_true() -> bool {
 
 fn d_monitor() -> String {
     "primary".into()
+}
+
+fn d_position() -> String {
+    "top_center".into()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -337,6 +343,7 @@ base_dir = '{BASE}'
 default_launcher = "antigravity"
 hide_on_fullscreen = true
 monitor_mode = "primary"
+position = "top_center"
 
 [[launchers]]
 id = "antigravity"
