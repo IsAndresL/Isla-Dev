@@ -47,6 +47,7 @@ pub struct Gfx {
     pub hpx: i32,
     pub scale: f32,
     pub alpha: Cell<f32>,
+    pub light: Cell<bool>,
     pub logo: Option<ID2D1Bitmap>,
 }
 
@@ -170,6 +171,7 @@ impl Gfx {
                 hpx: 0,
                 scale,
                 alpha: Cell::new(1.0),
+                light: Cell::new(true),
                 logo,
             };
             g.resize(scale, w, h)?;
@@ -516,12 +518,18 @@ impl Gfx {
             return;
         }
         if let Ok(curve) = self.waterdrop_curve_path(cx, w, h) {
-            // Halo difuso exterior Azul Glaciar
-            self.stroke_path(&curve, 0x38BDF8, 0.22 * pulse, 6.2);
-            // Halo intermedio Rojo Marca #E4002B
-            self.stroke_path(&curve, 0xE4002B, 0.45 * pulse, 3.2);
-            // Aro luminoso nítido Blanco Polar
-            self.stroke_path(&curve, 0xF8FAFC, 0.90 * pulse, 1.3);
+            if self.light.get() {
+                self.stroke_path(&curve, 0x0284C7, 0.25 * pulse, 6.2);
+                self.stroke_path(&curve, 0xE4002B, 0.48 * pulse, 3.2);
+                self.stroke_path(&curve, 0x0F172A, 0.70 * pulse, 1.3);
+            } else {
+                // Halo difuso exterior Azul Glaciar
+                self.stroke_path(&curve, 0x38BDF8, 0.22 * pulse, 6.2);
+                // Halo intermedio Rojo Marca #E4002B
+                self.stroke_path(&curve, 0xE4002B, 0.45 * pulse, 3.2);
+                // Aro luminoso nítido Blanco Polar
+                self.stroke_path(&curve, 0xF8FAFC, 0.90 * pulse, 1.3);
+            }
         }
     }
 
@@ -598,8 +606,13 @@ impl Gfx {
     /// Dibuja la insignia con el icono vectorial oficial de la tecnología en estilo minimalista
     pub fn draw_stack_badge(&self, stack: &str, x: f32, y: f32, s: f32) {
         let r = s * 0.28;
-        self.rrect(x, y, s, s, r, 0x141416, 1.0);
-        self.rrect_stroke(x, y, s, s, r, 0x27272A, 1.0, 1.0);
+        let (bg, bc) = if self.light.get() {
+            (0xE8F0F8, 0xCBD5E1)
+        } else {
+            (0x141416, 0x27272A)
+        };
+        self.rrect(x, y, s, s, r, bg, 1.0);
+        self.rrect_stroke(x, y, s, s, r, bc, 1.0, 1.0);
         self.draw_stack_icon_only(stack, x, y, s);
     }
 
@@ -608,12 +621,14 @@ impl Gfx {
         let cx = x + s * 0.5;
         let cy = y + s * 0.5;
         let st = stack.to_lowercase();
+        let ink = if self.light.get() { 0x0F172A } else { 0xFFFFFF };
+        let eye = if self.light.get() { 0xFFFFFF } else { 0x000000 };
 
         if st.contains("react") {
             // React: núcleo y órbitas atómicas
             let orbit_w = s * 0.38;
             let orbit_h = s * 0.14;
-            self.circle(cx, cy, s * 0.08, 0xFFFFFF, 1.0);
+            self.circle(cx, cy, s * 0.08, ink, 1.0);
             let e1 = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: orbit_w, radiusY: orbit_h };
             unsafe {
                 self.rt.DrawEllipse(&e1, &self.brush, 1.2, None);
@@ -630,83 +645,83 @@ impl Gfx {
         } else if st.contains("vite") {
             let hw = s * 0.32;
             let hh = s * 0.32;
-            self.line(cx - hw, cy - hh, cx, cy + hh, 0xFFFFFF, 0.90, 1.8);
-            self.line(cx + hw, cy - hh, cx, cy + hh, 0xFFFFFF, 0.90, 1.8);
-            self.line(cx - 2.0, cy - hh * 0.8, cx + 3.0, cy - 1.0, 0xFFFFFF, 1.0, 1.8);
-            self.line(cx + 3.0, cy - 1.0, cx - 1.0, cy + 1.0, 0xFFFFFF, 1.0, 1.8);
-            self.line(cx - 1.0, cy + 1.0, cx + 2.0, cy + hh * 0.8, 0xFFFFFF, 1.0, 1.8);
+            self.line(cx - hw, cy - hh, cx, cy + hh, ink, 0.90, 1.8);
+            self.line(cx + hw, cy - hh, cx, cy + hh, ink, 0.90, 1.8);
+            self.line(cx - 2.0, cy - hh * 0.8, cx + 3.0, cy - 1.0, ink, 1.0, 1.8);
+            self.line(cx + 3.0, cy - 1.0, cx - 1.0, cy + 1.0, ink, 1.0, 1.8);
+            self.line(cx - 1.0, cy + 1.0, cx + 2.0, cy + hh * 0.8, ink, 1.0, 1.8);
         } else if st.contains("vue") {
             let w_out = s * 0.36;
             let h_out = s * 0.32;
             let w_in = s * 0.22;
             let h_in = s * 0.18;
-            self.line(cx - w_out, cy - h_out, cx, cy + h_out, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx + w_out, cy - h_out, cx, cy + h_out, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx - w_in, cy - h_out, cx, cy - h_out + h_in, 0xFFFFFF, 0.50, 1.6);
-            self.line(cx + w_in, cy - h_out, cx, cy - h_out + h_in, 0xFFFFFF, 0.50, 1.6);
+            self.line(cx - w_out, cy - h_out, cx, cy + h_out, ink, 0.95, 2.0);
+            self.line(cx + w_out, cy - h_out, cx, cy + h_out, ink, 0.95, 2.0);
+            self.line(cx - w_in, cy - h_out, cx, cy - h_out + h_in, ink, 0.50, 1.6);
+            self.line(cx + w_in, cy - h_out, cx, cy - h_out + h_in, ink, 0.50, 1.6);
         } else if st.contains("astro") {
             let r_top = s * 0.32;
-            self.line(cx, cy - r_top, cx - s * 0.22, cy + r_top * 0.6, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx, cy - r_top, cx + s * 0.22, cy + r_top * 0.6, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx - s * 0.14, cy + r_top * 0.1, cx + s * 0.14, cy + r_top * 0.1, 0xFFFFFF, 0.70, 1.5);
-            self.circle(cx, cy + r_top * 0.8, 2.0, 0xFFFFFF, 0.9);
+            self.line(cx, cy - r_top, cx - s * 0.22, cy + r_top * 0.6, ink, 0.95, 2.0);
+            self.line(cx, cy - r_top, cx + s * 0.22, cy + r_top * 0.6, ink, 0.95, 2.0);
+            self.line(cx - s * 0.14, cy + r_top * 0.1, cx + s * 0.14, cy + r_top * 0.1, ink, 0.70, 1.5);
+            self.circle(cx, cy + r_top * 0.8, 2.0, ink, 0.9);
         } else if st.contains("next") {
             let nh = s * 0.30;
             let nw = s * 0.26;
-            self.line(cx - nw, cy - nh, cx - nw, cy + nh, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx - nw, cy - nh, cx + nw, cy + nh, 0xFFFFFF, 0.95, 2.0);
-            self.line(cx + nw, cy - nh, cx + nw, cy + nh * 0.3, 0xFFFFFF, 0.95, 2.0);
+            self.line(cx - nw, cy - nh, cx - nw, cy + nh, ink, 0.95, 2.0);
+            self.line(cx - nw, cy - nh, cx + nw, cy + nh, ink, 0.95, 2.0);
+            self.line(cx + nw, cy - nh, cx + nw, cy + nh * 0.3, ink, 0.95, 2.0);
         } else if st.contains("node") {
             let hr = s * 0.30;
             for i in 0..6 {
                 let a1 = i as f32 * std::f32::consts::TAU / 6.0;
                 let a2 = (i + 1) as f32 * std::f32::consts::TAU / 6.0;
-                self.line(cx + a1.cos() * hr, cy + a1.sin() * hr, cx + a2.cos() * hr, cy + a2.sin() * hr, 0xFFFFFF, 0.90, 1.5);
+                self.line(cx + a1.cos() * hr, cy + a1.sin() * hr, cx + a2.cos() * hr, cy + a2.sin() * hr, ink, 0.90, 1.5);
             }
-            self.circle(cx, cy, 2.5, 0xFFFFFF, 0.9);
+            self.circle(cx, cy, 2.5, ink, 0.9);
         } else if st.contains("python") {
             let pr = s * 0.22;
-            self.rrect(cx - pr, cy - pr, pr * 1.5, pr * 0.9, 3.0, 0xFFFFFF, 0.9);
-            self.circle(cx - pr * 0.4, cy - pr * 0.55, 1.5, 0x000000, 1.0);
-            self.rrect(cx - pr * 0.5, cy + pr * 0.1, pr * 1.5, pr * 0.9, 3.0, 0xFFFFFF, 0.6);
-            self.circle(cx + pr * 0.4, cy + pr * 0.55, 1.5, 0x000000, 1.0);
+            self.rrect(cx - pr, cy - pr, pr * 1.5, pr * 0.9, 3.0, ink, 0.9);
+            self.circle(cx - pr * 0.4, cy - pr * 0.55, 1.5, eye, 1.0);
+            self.rrect(cx - pr * 0.5, cy + pr * 0.1, pr * 1.5, pr * 0.9, 3.0, ink, 0.6);
+            self.circle(cx + pr * 0.4, cy + pr * 0.55, 1.5, eye, 1.0);
         } else if st.contains("rust") {
             let rr = s * 0.28;
-            self.ring(cx, cy, rr, 0xFFFFFF, 0.9, 1.6);
+            self.ring(cx, cy, rr, ink, 0.9, 1.6);
             for i in 0..8 {
                 let a = i as f32 * std::f32::consts::TAU / 8.0;
-                self.line(cx + a.cos() * rr, cy + a.sin() * rr, cx + a.cos() * (rr + 2.5), cy + a.sin() * (rr + 2.5), 0xFFFFFF, 0.9, 1.8);
+                self.line(cx + a.cos() * rr, cy + a.sin() * rr, cx + a.cos() * (rr + 2.5), cy + a.sin() * (rr + 2.5), ink, 0.9, 1.8);
             }
-            self.circle(cx, cy, 2.0, 0xFFFFFF, 1.0);
+            self.circle(cx, cy, 2.0, ink, 1.0);
         } else if st.contains("angular") {
             // Angular: escudo con A central
             let sw = s * 0.32;
             let sh = s * 0.34;
-            self.line(cx, cy - sh, cx - sw, cy - sh * 0.4, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx, cy - sh, cx + sw, cy - sh * 0.4, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx - sw, cy - sh * 0.4, cx - sw * 0.7, cy + sh * 0.5, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx + sw, cy - sh * 0.4, cx + sw * 0.7, cy + sh * 0.5, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx - sw * 0.7, cy + sh * 0.5, cx, cy + sh, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx + sw * 0.7, cy + sh * 0.5, cx, cy + sh, 0xFFFFFF, 0.9, 1.5);
-            self.line(cx, cy - sh * 0.45, cx - sw * 0.45, cy + sh * 0.35, 0xFFFFFF, 1.0, 1.7);
-            self.line(cx, cy - sh * 0.45, cx + sw * 0.45, cy + sh * 0.35, 0xFFFFFF, 1.0, 1.7);
-            self.line(cx - sw * 0.25, cy + sh * 0.05, cx + sw * 0.25, cy + sh * 0.05, 0xFFFFFF, 1.0, 1.5);
+            self.line(cx, cy - sh, cx - sw, cy - sh * 0.4, ink, 0.9, 1.5);
+            self.line(cx, cy - sh, cx + sw, cy - sh * 0.4, ink, 0.9, 1.5);
+            self.line(cx - sw, cy - sh * 0.4, cx - sw * 0.7, cy + sh * 0.5, ink, 0.9, 1.5);
+            self.line(cx + sw, cy - sh * 0.4, cx + sw * 0.7, cy + sh * 0.5, ink, 0.9, 1.5);
+            self.line(cx - sw * 0.7, cy + sh * 0.5, cx, cy + sh, ink, 0.9, 1.5);
+            self.line(cx + sw * 0.7, cy + sh * 0.5, cx, cy + sh, ink, 0.9, 1.5);
+            self.line(cx, cy - sh * 0.45, cx - sw * 0.45, cy + sh * 0.35, ink, 1.0, 1.7);
+            self.line(cx, cy - sh * 0.45, cx + sw * 0.45, cy + sh * 0.35, ink, 1.0, 1.7);
+            self.line(cx - sw * 0.25, cy + sh * 0.05, cx + sw * 0.25, cy + sh * 0.05, ink, 1.0, 1.5);
         } else if st.contains("svelte") {
             // Svelte: doble S estilizada
             let sw = s * 0.24;
             let sh = s * 0.28;
-            self.rrect_stroke(cx - sw, cy - sh, sw * 2.0, sh * 1.1, 4.5, 0xFFFFFF, 0.95, 1.7);
-            self.rrect_stroke(cx - sw, cy - sh * 0.1, sw * 2.0, sh * 1.1, 4.5, 0xFFFFFF, 0.75, 1.7);
+            self.rrect_stroke(cx - sw, cy - sh, sw * 2.0, sh * 1.1, 4.5, ink, 0.95, 1.7);
+            self.rrect_stroke(cx - sw, cy - sh * 0.1, sw * 2.0, sh * 1.1, 4.5, ink, 0.75, 1.7);
         } else if st.contains("typescript") {
             let bw = s * 0.56;
-            self.rrect_stroke(cx - bw * 0.5, cy - bw * 0.5, bw, bw, 4.0, 0xFFFFFF, 0.9, 1.4);
-            self.text("TS", &self.f.small_c, x, y, s, s, 0xFFFFFF, 0.95);
+            self.rrect_stroke(cx - bw * 0.5, cy - bw * 0.5, bw, bw, 4.0, ink, 0.9, 1.4);
+            self.text("TS", &self.f.small_c, x, y, s, s, ink, 0.95);
         } else {
             let fw = s * 0.36;
             let fh = s * 0.26;
-            self.rrect(cx - fw * 0.5, cy - fh * 0.3, fw, fh, 3.0, 0xFFFFFF, 0.15);
-            self.rrect_stroke(cx - fw * 0.5, cy - fh * 0.3, fw, fh, 3.0, 0xFFFFFF, 0.85, 1.4);
-            self.line(cx - fw * 0.5 + 2.0, cy - fh * 0.3 - 2.5, cx - fw * 0.1, cy - fh * 0.3 - 2.5, 0xFFFFFF, 0.85, 1.4);
+            self.rrect(cx - fw * 0.5, cy - fh * 0.3, fw, fh, 3.0, ink, 0.15);
+            self.rrect_stroke(cx - fw * 0.5, cy - fh * 0.3, fw, fh, 3.0, ink, 0.85, 1.4);
+            self.line(cx - fw * 0.5 + 2.0, cy - fh * 0.3 - 2.5, cx - fw * 0.1, cy - fh * 0.3 - 2.5, ink, 0.85, 1.4);
         }
     }
 

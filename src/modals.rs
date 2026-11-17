@@ -9,6 +9,7 @@ pub const WS_ICONS: &[&str] = &[
 
 impl App {
     pub(crate) fn draw_settings(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let def = self
             .cfg
@@ -26,7 +27,14 @@ impl App {
             _ => "Monitor principal".to_string(),
         };
 
-        let items: [(Hit, &str, String, String, Option<bool>); 10] = [
+        let items: [(Hit, &str, String, String, Option<bool>); 11] = [
+            (
+                Hit::ToggleTheme,
+                if pal.light { G_SUN } else { G_MOON },
+                "Modo Blanco Polar (Tema claro)".into(),
+                if pal.light { "Activo: fondo blanco polar · clic para modo oscuro".into() } else { "Inactivo: modo oscuro · clic para modo blanco".into() },
+                Some(self.cfg.light_mode),
+            ),
             (
                 Hit::ToggleVisibility,
                 G_POWER,
@@ -105,10 +113,10 @@ impl App {
         let py = y + 64.0;
         let pw = tw - 32.0;
         let ph = 76.0;
-        g.rrect(px, py, pw, ph, 12.0, CARD, 0.95);
-        g.rrect_stroke(px, py, pw, ph, 12.0, GLACIER, 0.20, 1.0);
-        g.text("Posición en pantalla", &g.f.body, px + 14.0, py + 9.0, 290.0, 19.0, WHITE, 1.0);
-        g.text(cur_pos.label(), &g.f.sub, px + 14.0, py + 29.0, 290.0, 17.0, GLACIER, 1.0);
+        g.rrect(px, py, pw, ph, 12.0, pal.card, 0.95);
+        g.rrect_stroke(px, py, pw, ph, 12.0, pal.glacier, 0.20, 1.0);
+        g.text("Posición en pantalla", &g.f.body, px + 14.0, py + 9.0, 290.0, 19.0, pal.white, 1.0);
+        g.text(cur_pos.label(), &g.f.sub, px + 14.0, py + 29.0, 290.0, 17.0, pal.glacier, 1.0);
         g.text(
             "Siempre visible · Se oculta en fullscreen",
             &g.f.tiny,
@@ -116,7 +124,7 @@ impl App {
             py + 48.0,
             290.0,
             16.0,
-            GRAY,
+            pal.gray,
             0.95,
         );
 
@@ -124,9 +132,9 @@ impl App {
         let my = py + 8.0;
         let mw = 182.0;
         let mh = 60.0;
-        g.rrect(mx, my, mw, mh, 9.0, BODY, 0.96);
-        g.rrect_stroke(mx, my, mw, mh, 9.0, GLACIER, 0.25, 1.0);
-        g.rrect(mx + 8.0, my + mh - 5.0, mw - 16.0, 2.5, 1.2, GLACIER, 0.35);
+        g.rrect(mx, my, mw, mh, 9.0, if pal.light { 0xE2E8F0 } else { pal.body }, 0.96);
+        g.rrect_stroke(mx, my, mw, mh, 9.0, pal.glacier, 0.25, 1.0);
+        g.rrect(mx + 8.0, my + mh - 5.0, mw - 16.0, 2.5, 1.2, pal.glacier, 0.35);
 
         let spots: [(IslandPos, &str, f32, f32); 6] = [
             (IslandPos::TopLeft, "Izq", mx + 7.0, my + 6.0),
@@ -139,9 +147,9 @@ impl App {
         for (spot, lbl, sx, sy) in spots {
             let active = cur_pos == spot;
             let hov = self.hov(Hit::SetPosition(spot));
-            let bg = if active { BRAND_RED } else { CARD_HOV };
+            let bg = if active { pal.brand_red } else { pal.card_hov };
             let ba = if active { 0.95 } else if hov { 0.95 } else { 0.85 };
-            let bc = if active { WHITE } else if hov { GLACIER } else { BORDER };
+            let bc = if active { 0xFFFFFF } else if hov { pal.glacier } else { pal.border };
             let bca = if active { 0.90 } else if hov { 0.85 } else { 0.9 };
             g.rrect(sx, sy, 44.0, 16.0, 8.0, bg, ba);
             g.rrect_stroke(sx, sy, 44.0, 16.0, 8.0, bc, bca, 1.0);
@@ -152,7 +160,7 @@ impl App {
                 sy,
                 44.0,
                 16.0,
-                if active || hov { WHITE } else { GRAY },
+                if active { 0xFFFFFF } else if hov { pal.white } else { pal.gray },
                 1.0,
             );
             self.hit(sx, sy, 44.0, 16.0, Hit::SetPosition(spot));
@@ -168,7 +176,7 @@ impl App {
                 30.0,
                 30.0,
                 9.0,
-                if quit { RED } else { WHITE },
+                if quit { pal.red } else { pal.white },
                 if quit { 0.16 } else { 0.07 },
             );
             g.text(
@@ -178,7 +186,7 @@ impl App {
                 ry + 5.0,
                 30.0,
                 30.0,
-                if quit { RED } else { WHITE },
+                if quit { pal.red } else { pal.white },
                 1.0,
             );
             g.text(
@@ -188,21 +196,21 @@ impl App {
                 ry + 2.0,
                 tw - 150.0,
                 19.0,
-                if quit { RED } else { WHITE },
+                if quit { pal.red } else { pal.white },
                 1.0,
             );
-            g.text(&sub, &g.f.sub, lx + 64.0, ry + 20.0, tw - 150.0, 16.0, GRAY, 1.0);
+            g.text(&sub, &g.f.sub, lx + 64.0, ry + 20.0, tw - 150.0, 16.0, pal.gray, 1.0);
             if let Some(on) = toggle {
                 self.toggle_pill(lx + tw - 66.0, ry + 10.0, on);
             } else if !quit {
-                g.text(G_CHEV, &g.f.icon_sm, lx + tw - 48.0, ry + 8.0, 24.0, 24.0, DIM, 1.0);
+                g.text(G_CHEV, &g.f.icon_sm, lx + tw - 48.0, ry + 8.0, 24.0, 24.0, pal.dim, 1.0);
             }
             ry += 44.0;
         }
 
         // Pie de firma solicitado por el usuario + acceso opcional a config.toml
         let footer = format!("{} · {}", APP_AUTHOR, APP_VERSION);
-        g.text(&footer, &g.f.tiny_c, lx + 16.0, ry + 4.0, tw - 32.0, 18.0, GRAY, 0.9);
+        g.text(&footer, &g.f.tiny_c, lx + 16.0, ry + 4.0, tw - 32.0, 18.0, pal.gray, 0.9);
         let cfg_hov = self.hov(Hit::EditConfig);
         g.text(
             "Abrir config.toml",
@@ -211,13 +219,14 @@ impl App {
             ry + 2.0,
             120.0,
             20.0,
-            if cfg_hov { WHITE } else { DIM },
+            if cfg_hov { pal.white } else { pal.dim },
             0.85,
         );
         self.hit(lx + tw - 140.0, ry + 2.0, 120.0, 20.0, Hit::EditConfig);
     }
 
     pub(crate) fn draw_wizard(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let (title, sub) = match self.step {
             Step::Name => ("Nuevo proyecto · Paso 1", "Nombre, tecnología y repositorio"),
@@ -231,14 +240,14 @@ impl App {
             Step::Name => {
                 let bx = lx + 16.0;
                 let bw = tw - 32.0;
-                g.rrect(bx, ry, bw, 42.0, 12.0, CARD, 1.0);
+                g.rrect(bx, ry, bw, 42.0, 12.0, pal.card, 1.0);
                 g.rrect_stroke(
                     bx + 0.5,
                     ry + 0.5,
                     bw - 1.0,
                     41.0,
                     12.0,
-                    if self.wiz_err.is_some() { RED } else { WHITE },
+                    if self.wiz_err.is_some() { pal.red } else { pal.white },
                     0.55,
                     1.2,
                 );
@@ -255,7 +264,7 @@ impl App {
                     ry,
                     bw - 28.0,
                     42.0,
-                    if empty { DIM } else { WHITE },
+                    if empty { pal.dim } else { pal.white },
                     1.0,
                 );
                 let cx = if empty {
@@ -263,11 +272,11 @@ impl App {
                 } else {
                     (bx + 14.0 + g.measure(&self.wiz_name, &g.f.input) + 1.5).min(bx + bw - 14.0)
                 };
-                g.line(cx, ry + 10.0, cx, ry + 32.0, WHITE, 0.95, 1.5);
+                g.line(cx, ry + 10.0, cx, ry + 32.0, pal.white, 0.95, 1.5);
                 self.hit(bx, ry, bw, 42.0, Hit::Input);
 
                 if let Some(err) = &self.wiz_err {
-                    g.text(err, &g.f.sub, bx + 4.0, ry + 45.0, bw, 16.0, RED, 1.0);
+                    g.text(err, &g.f.sub, bx + 4.0, ry + 45.0, bw, 16.0, pal.red, 1.0);
                 } else {
                     let preview = format!("{}\\{}", self.cfg.base_dir, self.wiz_name);
                     g.text(
@@ -277,7 +286,7 @@ impl App {
                         ry + 45.0,
                         bw,
                         16.0,
-                        GRAY,
+                        pal.gray,
                         1.0,
                     );
                 }
@@ -289,7 +298,7 @@ impl App {
                     lx + 30.0,
                     ry + 12.0,
                     16.0,
-                    if self.wiz_github { GREEN } else { GRAY },
+                    if self.wiz_github { pal.green } else { pal.gray },
                     1.0,
                 );
                 g.text(
@@ -299,7 +308,7 @@ impl App {
                     ry,
                     tw - 135.0,
                     40.0,
-                    WHITE,
+                    pal.white,
                     1.0,
                 );
                 self.toggle_pill(lx + tw - 66.0, ry + 10.0, self.wiz_github);
@@ -312,9 +321,9 @@ impl App {
                     let sel = i == self.wiz_tpl;
                     self.row_bg(lx + 16.0, ry, tw - 32.0, 40.0, Hit::Template(i), sel);
                     g.draw_stack_badge(&t.stack, lx + 24.0, ry + 5.0, 30.0);
-                    g.text(&t.name, &g.f.body, lx + 62.0, ry, tw - 130.0, 40.0, WHITE, 1.0);
+                    g.text(&t.name, &g.f.body, lx + 62.0, ry, tw - 130.0, 40.0, pal.white, 1.0);
                     if sel {
-                        g.circle(lx + tw - 36.0, ry + 20.0, 9.0, WHITE, 1.0);
+                        g.circle(lx + tw - 36.0, ry + 20.0, 9.0, pal.white, 1.0);
                         g.text(
                             G_CHECK,
                             &g.f.icon_sm,
@@ -322,7 +331,7 @@ impl App {
                             ry + 11.0,
                             18.0,
                             18.0,
-                            0x000000,
+                            pal.inv_ink,
                             1.0,
                         );
                     }
@@ -343,19 +352,19 @@ impl App {
                             20.0,
                             20.0,
                             6.0,
-                            if on { WHITE } else { BORDER },
+                            if on { pal.white } else { pal.border },
                             1.0,
                         );
                         if on {
-                            g.text(G_CHECK, &g.f.icon_sm, lx + 26.0, ry + 10.0, 20.0, 20.0, 0x000000, 1.0);
+                            g.text(G_CHECK, &g.f.icon_sm, lx + 26.0, ry + 10.0, 20.0, 20.0, pal.inv_ink, 1.0);
                         }
-                        g.text(&l.name, &g.f.body, lx + 56.0, ry, 200.0, 40.0, WHITE, 1.0);
-                        g.text(&l.command, &g.f.sub_r, lx + 250.0, ry, tw - 276.0, 40.0, DIM, 1.0);
+                        g.text(&l.name, &g.f.body, lx + 56.0, ry, 200.0, 40.0, pal.white, 1.0);
+                        g.text(&l.command, &g.f.sub_r, lx + 250.0, ry, tw - 276.0, 40.0, pal.dim, 1.0);
                         ry += 46.0;
                     }
                 }
                 self.row_bg(lx + 16.0, ry, tw - 32.0, 38.0, Hit::WizOpenLibEditor, false);
-                g.text(G_ADD, &g.f.icon_sm, lx + 26.0, ry, 24.0, 38.0, GREEN, 1.0);
+                g.text(G_ADD, &g.f.icon_sm, lx + 26.0, ry, 24.0, 38.0, pal.green, 1.0);
                 g.text(
                     "Configurar o agregar nueva librería a este framework…",
                     &g.f.sub,
@@ -363,7 +372,7 @@ impl App {
                     ry,
                     tw - 80.0,
                     38.0,
-                    GREEN,
+                    pal.green,
                     1.0,
                 );
                 ry += 46.0;
@@ -378,14 +387,14 @@ impl App {
                         28.0,
                         28.0,
                         8.0,
-                        WHITE,
+                        pal.white,
                         if sel { 0.18 } else { 0.07 },
                     );
-                    g.text(G_TERM, &g.f.icon_sm, lx + 24.0, ry + 6.0, 28.0, 28.0, WHITE, 1.0);
-                    g.text(&l.name, &g.f.body, lx + 62.0, ry, 210.0, 40.0, WHITE, 1.0);
-                    g.text(&l.command, &g.f.sub_r, lx + 270.0, ry, tw - 325.0, 40.0, DIM, 1.0);
+                    g.text(G_TERM, &g.f.icon_sm, lx + 24.0, ry + 6.0, 28.0, 28.0, pal.white, 1.0);
+                    g.text(&l.name, &g.f.body, lx + 62.0, ry, 210.0, 40.0, pal.white, 1.0);
+                    g.text(&l.command, &g.f.sub_r, lx + 270.0, ry, tw - 325.0, 40.0, pal.dim, 1.0);
                     if sel {
-                        g.circle(lx + tw - 36.0, ry + 20.0, 9.0, WHITE, 1.0);
+                        g.circle(lx + tw - 36.0, ry + 20.0, 9.0, pal.white, 1.0);
                         g.text(
                             G_CHECK,
                             &g.f.icon_sm,
@@ -393,14 +402,14 @@ impl App {
                             ry + 11.0,
                             18.0,
                             18.0,
-                            0x000000,
+                            pal.inv_ink,
                             1.0,
                         );
                     }
                     ry += 46.0;
                 }
                 self.row_bg(lx + 16.0, ry, tw - 32.0, 38.0, Hit::WizOpenLauncherEditor, false);
-                g.text(G_ADD, &g.f.icon_sm, lx + 26.0, ry, 24.0, 38.0, GREEN, 1.0);
+                g.text(G_ADD, &g.f.icon_sm, lx + 26.0, ry, 24.0, 38.0, pal.green, 1.0);
                 g.text(
                     "Agregar otro programa (.exe) a 'Abrir con'…",
                     &g.f.sub,
@@ -408,7 +417,7 @@ impl App {
                     ry,
                     tw - 80.0,
                     38.0,
-                    GREEN,
+                    pal.green,
                     1.0,
                 );
                 ry += 46.0;
@@ -423,7 +432,7 @@ impl App {
             tw - 32.0,
             42.0,
             12.0,
-            WHITE,
+            pal.white,
             if hov { 1.0 } else { 0.90 },
         );
         let btn = if self.step == Step::Launcher {
@@ -431,11 +440,12 @@ impl App {
         } else {
             "Continuar  →"
         };
-        g.text(btn, &g.f.btn, lx + 16.0, ry, tw - 32.0, 42.0, 0x000000, 1.0);
+        g.text(btn, &g.f.btn, lx + 16.0, ry, tw - 32.0, 42.0, pal.inv_ink, 1.0);
         self.hit(lx + 16.0, ry, tw - 32.0, 42.0, Hit::Next);
     }
 
     pub(crate) fn draw_git_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let Some(p) = self.cfg.projects.get(self.git_proj_idx) else { return };
         let git_info = self.git_states.get(&p.path);
@@ -457,13 +467,13 @@ impl App {
             ry,
             bw,
             18.0,
-            GRAY,
+            pal.gray,
             1.0,
         );
         ry += 20.0;
 
-        g.rrect(bx, ry, bw, 38.0, 10.0, CARD, 1.0);
-        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 37.0, 10.0, WHITE, 0.5, 1.0);
+        g.rrect(bx, ry, bw, 38.0, 10.0, pal.card, 1.0);
+        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 37.0, 10.0, pal.white, 0.5, 1.0);
         let empty = self.git_commit_msg.is_empty();
         let msg_txt = if empty {
             "Escribe el nombre del commit (ej. feat: login y mejoras)"
@@ -477,7 +487,7 @@ impl App {
             ry,
             bw - 24.0,
             38.0,
-            if empty { DIM } else { WHITE },
+            if empty { pal.dim } else { pal.white },
             1.0,
         );
         let cx = if empty {
@@ -485,7 +495,7 @@ impl App {
         } else {
             (bx + 12.0 + g.measure(&self.git_commit_msg, &g.f.body) + 1.5).min(bx + bw - 14.0)
         };
-        g.line(cx, ry + 9.0, cx, ry + 29.0, WHITE, 0.9, 1.4);
+        g.line(cx, ry + 9.0, cx, ry + 29.0, pal.white, 0.9, 1.4);
         self.hit(bx, ry, bw, 38.0, Hit::GitCommitInput);
         ry += 48.0;
 
@@ -496,31 +506,31 @@ impl App {
             } else {
                 "Crear repositorio en GitHub como: Privado"
             };
-            g.text(vis_txt, &g.f.body, bx + 14.0, ry, bw - 80.0, 38.0, WHITE, 1.0);
+            g.text(vis_txt, &g.f.body, bx + 14.0, ry, bw - 80.0, 38.0, pal.white, 1.0);
             self.toggle_pill(bx + bw - 50.0, ry + 9.0, self.git_public);
             ry += 46.0;
         }
 
         let hov_push = self.hov(Hit::GitDoCommitPush);
-        g.rrect(bx, ry, bw, 42.0, 11.0, GREEN, if hov_push { 0.28 } else { 0.18 });
-        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 41.0, 11.0, GREEN, 0.75, 1.2);
+        g.rrect(bx, ry, bw, 42.0, 11.0, pal.green, if hov_push { 0.28 } else { 0.18 });
+        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, 41.0, 11.0, pal.green, 0.75, 1.2);
         let push_label = if has_remote {
             "↑ Hacer Commit y Push a GitHub (Enter)"
         } else {
             "↑ Inicializar Git, Crear Repo en GitHub y hacer Push (Enter)"
         };
-        g.text(push_label, &g.f.btn, bx, ry, bw, 42.0, GREEN, 1.0);
+        g.text(push_label, &g.f.btn, bx, ry, bw, 42.0, pal.green, 1.0);
         self.hit(bx, ry, bw, 42.0, Hit::GitDoCommitPush);
         ry += 52.0;
 
         let half_w = (bw - 10.0) / 2.0;
         self.row_bg(bx, ry, half_w, 38.0, Hit::GitDoPull, false);
-        g.text(G_DOWNLOAD, &g.f.icon_sm, bx + 10.0, ry, 24.0, 38.0, WHITE, 1.0);
-        g.text("Git Pull (bajar cambios)", &g.f.body, bx + 38.0, ry, half_w - 44.0, 38.0, WHITE, 1.0);
+        g.text(G_DOWNLOAD, &g.f.icon_sm, bx + 10.0, ry, 24.0, 38.0, pal.white, 1.0);
+        g.text("Git Pull (bajar cambios)", &g.f.body, bx + 38.0, ry, half_w - 44.0, 38.0, pal.white, 1.0);
 
         if has_remote {
             self.row_bg(bx + half_w + 10.0, ry, half_w, 38.0, Hit::GitOpenRepoWeb, false);
-            g.text(G_GLOBE, &g.f.icon_sm, bx + half_w + 20.0, ry, 24.0, 38.0, WHITE, 1.0);
+            g.text(G_GLOBE, &g.f.icon_sm, bx + half_w + 20.0, ry, 24.0, 38.0, pal.white, 1.0);
             g.text(
                 "Abrir en GitHub.com",
                 &g.f.body,
@@ -528,12 +538,12 @@ impl App {
                 ry,
                 half_w - 54.0,
                 38.0,
-                WHITE,
+                pal.white,
                 1.0,
             );
         } else {
             self.row_bg(bx + half_w + 10.0, ry, half_w, 38.0, Hit::GitOpenLogTerm, false);
-            g.text(G_TERM, &g.f.icon_sm, bx + half_w + 20.0, ry, 24.0, 38.0, WHITE, 1.0);
+            g.text(G_TERM, &g.f.icon_sm, bx + half_w + 20.0, ry, 24.0, 38.0, pal.white, 1.0);
             g.text(
                 "Ver consola Git",
                 &g.f.body,
@@ -541,13 +551,14 @@ impl App {
                 ry,
                 half_w - 54.0,
                 38.0,
-                WHITE,
+                pal.white,
                 1.0,
             );
         }
     }
 
     pub(crate) fn draw_note_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let Some(p) = self.cfg.projects.get(self.note_proj_idx) else { return };
         self.header(
@@ -565,8 +576,8 @@ impl App {
         let box_h = 160.0;
 
         // Caja de texto amplia estilo tarjeta / textarea limpia
-        g.rrect(bx, ry, bw, box_h, 10.0, 0x0C1017, 0.95);
-        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, box_h - 1.0, 10.0, ACCENT, 0.45, 1.0);
+        g.rrect(bx, ry, bw, box_h, 10.0, pal.box_bg, 0.95);
+        g.rrect_stroke(bx + 0.5, ry + 0.5, bw - 1.0, box_h - 1.0, 10.0, pal.accent, 0.45, 1.0);
         self.hit(bx, ry, bw, box_h, Hit::NoteInput);
 
         let cur_count = self.note_text.chars().count();
@@ -587,7 +598,7 @@ impl App {
             ry + 12.0,
             bw - 28.0,
             box_h - 34.0,
-            WHITE,
+            pal.white,
             0.95,
         );
 
@@ -600,7 +611,7 @@ impl App {
             ry + box_h - 22.0,
             64.0,
             16.0,
-            if cur_count > 900 { AMBER } else { GRAY },
+            if cur_count > 900 { pal.amber } else { pal.gray },
             0.6,
         );
         ry += box_h + 14.0;
@@ -610,19 +621,20 @@ impl App {
         let mut ax = bx + bw - btn_sz;
 
         // Guardar
-        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, GREEN, true, Hit::NoteSave);
+        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, pal.green, true, Hit::NoteSave);
         ax -= btn_sz + 10.0;
 
         // Papelera monocromática
         let trash_hov = self.hov(Hit::NoteClear);
-        self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { RED } else { GRAY }, false, Hit::NoteClear);
+        self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { pal.red } else { pal.gray }, false, Hit::NoteClear);
         ax -= btn_sz + 10.0;
 
         // Cancelar / Cerrar
-        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, GRAY, false, Hit::Back);
+        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, pal.gray, false, Hit::Back);
     }
 
     pub(crate) fn draw_workspace_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let is_edit = self.ws_edit_idx.is_some();
         let title = if is_edit { "Editar Grupo de Trabajo" } else { "Nuevo Grupo de Trabajo" };
@@ -633,13 +645,13 @@ impl App {
         let bw = tw - 40.0;
 
         // Campo de Nombre
-        g.text("Nombre del grupo:", &g.f.sub, bx, ry, bw, 18.0, GRAY, 1.0);
+        g.text("Nombre del grupo:", &g.f.sub, bx, ry, bw, 18.0, pal.gray, 1.0);
         ry += 22.0;
         self.draw_input_box(bx, ry, bw, 36.0, "Ej. Trabajo, Clientes, Estudio…", &self.ws_name, true, Hit::WsNameInput);
         ry += 48.0;
 
         // Selector de Icono / Emoji
-        g.text("Icono del grupo:", &g.f.sub, bx, ry, bw, 18.0, GRAY, 1.0);
+        g.text("Icono del grupo:", &g.f.sub, bx, ry, bw, 18.0, pal.gray, 1.0);
         ry += 24.0;
 
         let icon_sz = 34.0;
@@ -654,7 +666,7 @@ impl App {
                 icon_sz,
                 icon_sz,
                 8.0,
-                if is_sel { ACCENT } else { CARD },
+                if is_sel { pal.accent } else { pal.card },
                 if is_sel { 0.28 } else if hov { 0.9 } else { 0.5 },
             );
             g.rrect_stroke(
@@ -663,7 +675,7 @@ impl App {
                 icon_sz - 1.0,
                 icon_sz - 1.0,
                 8.0,
-                if is_sel { ACCENT } else { BORDER },
+                if is_sel { pal.accent } else { pal.border },
                 if is_sel { 0.9 } else { 0.6 },
                 1.0,
             );
@@ -674,7 +686,7 @@ impl App {
                 ry,
                 icon_sz,
                 icon_sz,
-                if is_sel || hov { WHITE } else { GRAY },
+                if is_sel || hov { pal.white } else { pal.gray },
                 1.0,
             );
             self.hit(ix, ry, icon_sz, icon_sz, Hit::WsIconPick(k));
@@ -691,21 +703,22 @@ impl App {
         let mut ax = bx + bw - btn_sz;
 
         // Guardar
-        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, GREEN, true, Hit::WsSave);
+        self.mini_action_btn(ax, ry, btn_sz, G_CHECK, pal.green, true, Hit::WsSave);
         ax -= btn_sz + 10.0;
 
         // Eliminar (solo si es edición)
         if let Some(idx) = self.ws_edit_idx {
             let trash_hov = self.hov(Hit::WsDelete(idx));
-            self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { RED } else { GRAY }, false, Hit::WsDelete(idx));
+            self.mini_action_btn(ax, ry, btn_sz, G_TRASH, if trash_hov { pal.red } else { pal.gray }, false, Hit::WsDelete(idx));
             ax -= btn_sz + 10.0;
         }
 
         // Cancelar
-        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, GRAY, false, Hit::Back);
+        self.mini_action_btn(ax, ry, btn_sz, G_CLOSE, pal.gray, false, Hit::Back);
     }
 
     pub(crate) fn draw_custom_editor(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         self.header(
             lx,
@@ -733,7 +746,7 @@ impl App {
                 tab_w,
                 30.0,
                 8.0,
-                if active { WHITE } else { CARD },
+                if active { pal.white } else { pal.card },
                 if active {
                     0.95
                 } else if hov {
@@ -742,7 +755,7 @@ impl App {
                     0.6
                 },
             );
-            g.rrect_stroke(tx, ry, tab_w, 30.0, 8.0, BORDER, 0.8, 1.0);
+            g.rrect_stroke(tx, ry, tab_w, 30.0, 8.0, pal.border, 0.8, 1.0);
             g.text(
                 t_label,
                 &g.f.badge,
@@ -750,7 +763,7 @@ impl App {
                 ry,
                 tab_w,
                 30.0,
-                if active { 0x000000 } else { WHITE },
+                if active { pal.inv_ink } else { pal.white },
                 1.0,
             );
             self.hit(tx, ry, tab_w, 30.0, Hit::EdTab(idx));
@@ -767,9 +780,9 @@ impl App {
                     .map(|t| t.name.as_str())
                     .unwrap_or("—");
 
-                g.rrect(bx, ry, bw, 34.0, 9.0, CARD, 1.0);
-                g.rrect_stroke(bx, ry, bw, 34.0, 9.0, BORDER, 0.8, 1.0);
-                self.mini_action_btn(bx + 4.0, ry + 4.0, 26.0, G_BACK, WHITE, false, Hit::EdPrevTpl);
+                g.rrect(bx, ry, bw, 34.0, 9.0, pal.card, 1.0);
+                g.rrect_stroke(bx, ry, bw, 34.0, 9.0, pal.border, 0.8, 1.0);
+                self.mini_action_btn(bx + 4.0, ry + 4.0, 26.0, G_BACK, pal.white, false, Hit::EdPrevTpl);
                 g.text(
                     &format!("Framework: {tpl_name}"),
                     &g.f.badge,
@@ -777,7 +790,7 @@ impl App {
                     ry,
                     bw - 72.0,
                     34.0,
-                    WHITE,
+                    pal.white,
                     1.0,
                 );
                 self.mini_action_btn(
@@ -785,7 +798,7 @@ impl App {
                     ry + 4.0,
                     26.0,
                     G_CHEV,
-                    WHITE,
+                    pal.white,
                     false,
                     Hit::EdNextTpl,
                 );
@@ -818,7 +831,7 @@ impl App {
                     112.0,
                     34.0,
                     "+ Agregar",
-                    GREEN,
+                    pal.green,
                     true,
                     Hit::EdSave,
                 );
@@ -832,7 +845,7 @@ impl App {
                         ry - 4.0,
                         bw,
                         18.0,
-                        if *is_err { RED } else { GREEN },
+                        if *is_err { pal.red } else { pal.green },
                         1.0,
                     );
                     ry += 18.0;
@@ -850,20 +863,20 @@ impl App {
                             20.0,
                             20.0,
                             5.0,
-                            if l.default { WHITE } else { BORDER },
+                            if l.default { pal.white } else { pal.border },
                             1.0,
                         );
                         if l.default {
-                            g.text(G_CHECK, &g.f.icon_sm, bx + 10.0, ry + 9.0, 20.0, 20.0, 0x000000, 1.0);
+                            g.text(G_CHECK, &g.f.icon_sm, bx + 10.0, ry + 9.0, 20.0, 20.0, pal.inv_ink, 1.0);
                         }
-                        g.text(&l.name, &g.f.body, bx + 38.0, ry, 180.0, 38.0, WHITE, 1.0);
-                        g.text(&l.command, &g.f.sub_r, bx + 215.0, ry, bw - 256.0, 38.0, DIM, 1.0);
+                        g.text(&l.name, &g.f.body, bx + 38.0, ry, 180.0, 38.0, pal.white, 1.0);
+                        g.text(&l.command, &g.f.sub_r, bx + 215.0, ry, bw - 256.0, 38.0, pal.dim, 1.0);
                         self.mini_action_btn(
                             bx + bw - 32.0,
                             ry + 6.0,
                             26.0,
                             G_TRASH,
-                            RED,
+                            pal.red,
                             false,
                             Hit::EdDeleteItem(i),
                         );
@@ -888,7 +901,7 @@ impl App {
                     144.0,
                     36.0,
                     "Elegir archivo .exe…",
-                    WHITE,
+                    pal.white,
                     false,
                     Hit::EdPickExe,
                 );
@@ -910,7 +923,7 @@ impl App {
                     112.0,
                     36.0,
                     "+ Guardar",
-                    GREEN,
+                    pal.green,
                     true,
                     Hit::EdSave,
                 );
@@ -924,7 +937,7 @@ impl App {
                         ry - 4.0,
                         bw,
                         18.0,
-                        if *is_err { RED } else { GREEN },
+                        if *is_err { pal.red } else { pal.green },
                         1.0,
                     );
                     ry += 18.0;
@@ -935,15 +948,15 @@ impl App {
                 let sc = self.ed_scroll.min(max_sc);
                 for (i, l) in self.cfg.launchers.iter().enumerate().skip(sc).take(max_vis) {
                     self.row_bg(bx, ry, bw, 40.0, Hit::Launcher(i), false);
-                    g.text(&l.name, &g.f.body, bx + 14.0, ry, 175.0, 40.0, WHITE, 1.0);
-                    g.text(&l.command, &g.f.sub_r, bx + 190.0, ry, bw - 230.0, 40.0, DIM, 1.0);
+                    g.text(&l.name, &g.f.body, bx + 14.0, ry, 175.0, 40.0, pal.white, 1.0);
+                    g.text(&l.command, &g.f.sub_r, bx + 190.0, ry, bw - 230.0, 40.0, pal.dim, 1.0);
                     if self.cfg.launchers.len() > 1 {
                         self.mini_action_btn(
                             bx + bw - 32.0,
                             ry + 7.0,
                             26.0,
                             G_TRASH,
-                            RED,
+                            pal.red,
                             false,
                             Hit::EdDeleteItem(i),
                         );
@@ -968,7 +981,7 @@ impl App {
                     164.0,
                     36.0,
                     &format!("Icono: {}", self.ed_f3),
-                    WHITE,
+                    pal.white,
                     false,
                     Hit::EdCycleStack,
                 );
@@ -992,7 +1005,7 @@ impl App {
                     bw,
                     36.0,
                     "+ Guardar nuevo Framework",
-                    GREEN,
+                    pal.green,
                     true,
                     Hit::EdSave,
                 );
@@ -1006,7 +1019,7 @@ impl App {
                         ry - 4.0,
                         bw,
                         18.0,
-                        if *is_err { RED } else { GREEN },
+                        if *is_err { pal.red } else { pal.green },
                         1.0,
                     );
                     ry += 18.0;
@@ -1018,21 +1031,21 @@ impl App {
                 for (i, t) in self.cfg.templates.iter().enumerate().skip(sc).take(max_vis) {
                     self.row_bg(lx, ry, tw, 44.0, Hit::Template(i), false);
                     g.draw_stack_badge(&t.stack, lx + 20.0, ry + 6.0, 32.0);
-                    g.text(&t.name, &g.f.body, lx + 60.0, ry, 180.0, 44.0, WHITE, 1.0);
+                    g.text(&t.name, &g.f.body, lx + 60.0, ry, 180.0, 44.0, pal.white, 1.0);
                     let cmd_preview = t
                         .create
                         .first()
                         .or(t.setup.first())
                         .map(|s| s.as_str())
                         .unwrap_or("Carpeta limpia");
-                    g.text(cmd_preview, &g.f.sub_r, lx + 240.0, ry, tw - 295.0, 44.0, DIM, 1.0);
+                    g.text(cmd_preview, &g.f.sub_r, lx + 240.0, ry, tw - 295.0, 44.0, pal.dim, 1.0);
                     if self.cfg.templates.len() > 1 {
                         self.mini_action_btn(
                             lx + tw - 44.0,
                             ry + 9.0,
                             26.0,
                             G_TRASH,
-                            RED,
+                            pal.red,
                             false,
                             Hit::EdDeleteItem(i),
                         );
@@ -1054,43 +1067,45 @@ impl App {
         focused: bool,
         id: Hit,
     ) {
+        let pal = self.pal();
         let g = &self.gfx;
-        g.rrect(x, y, w, h, 8.0, WHITE, if focused { 0.08 } else { 0.04 });
+        g.rrect(x, y, w, h, 8.0, pal.white, if focused { 0.08 } else { 0.04 });
         g.rrect_stroke(
             x + 0.5,
             y + 0.5,
             w - 1.0,
             h - 1.0,
             8.0,
-            if focused { WHITE } else { BORDER },
+            if focused { pal.white } else { pal.border },
             if focused { 0.65 } else { 0.7 },
             1.0,
         );
         if val.is_empty() {
-            g.text(placeholder, &g.f.sub, x + 10.0, y, w - 20.0, h, DIM, 1.0);
+            g.text(placeholder, &g.f.sub, x + 10.0, y, w - 20.0, h, pal.dim, 1.0);
         } else {
-            g.text(val, &g.f.body, x + 10.0, y, w - 20.0, h, WHITE, 1.0);
+            g.text(val, &g.f.body, x + 10.0, y, w - 20.0, h, pal.white, 1.0);
         }
         if focused {
             let cx = (x + 10.0 + g.measure(val, &g.f.body) + 1.5).min(x + w - 10.0);
-            g.line(cx, y + 9.0, cx, y + h - 9.0, WHITE, 0.95, 1.4);
+            g.line(cx, y + 9.0, cx, y + h - 9.0, pal.white, 0.95, 1.4);
         }
         self.hit(x, y, w, h, id);
     }
 
     pub(crate) fn draw_status(&self, lx: f32, y: f32, tw: f32, h: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let cy = y + h / 2.0;
         match self.skind {
             SKind::Error => {
-                g.circle(lx + 30.0, cy, 18.0, RED, 1.0);
-                g.text(G_ERR, &g.f.icon, lx + 12.0, cy - 18.0, 36.0, 36.0, WHITE, 1.0);
+                g.circle(lx + 30.0, cy, 18.0, pal.red, 1.0);
+                g.text(G_ERR, &g.f.icon, lx + 12.0, cy - 18.0, 36.0, 36.0, 0xFFFFFF, 1.0);
             }
             _ => {
                 g.draw_logo(lx + 14.0, cy - 18.0, 36.0, 36.0, 1.0);
             }
         }
-        g.text(&self.s_title, &g.f.title, lx + 60.0, cy - 19.0, tw - 110.0, 19.0, WHITE, 1.0);
+        g.text(&self.s_title, &g.f.title, lx + 60.0, cy - 19.0, tw - 110.0, 19.0, pal.white, 1.0);
         g.text(
             &self.s_sub,
             &g.f.sub,
@@ -1099,11 +1114,11 @@ impl App {
             tw - 110.0,
             18.0,
             if self.skind == SKind::Creating {
-                WHITE
+                pal.white
             } else if self.skind == SKind::Error {
-                AMBER
+                pal.amber
             } else {
-                GRAY
+                pal.gray
             },
             1.0,
         );
@@ -1113,14 +1128,14 @@ impl App {
             let bar_x = lx + 60.0;
             let bar_w = tw - 110.0;
             let bar_y = y + h - 7.0;
-            g.rrect(bar_x, bar_y, bar_w, 3.0, 1.5, WHITE, 0.12);
+            g.rrect(bar_x, bar_y, bar_w, 3.0, 1.5, pal.white, 0.12);
             g.rrect(
                 bar_x,
                 bar_y,
                 (bar_w * prog.clamp(0.05, 1.0)).max(8.0),
                 3.0,
                 1.5,
-                GREEN,
+                pal.green,
                 0.95,
             );
         }
@@ -1131,32 +1146,33 @@ impl App {
                 for i in 0..8 {
                     let a = i as f32 / 8.0 * std::f32::consts::TAU + self.spin * 5.0;
                     let fade = 0.2 + 0.8 * (i as f32 / 8.0);
-                    g.circle(rx + a.cos() * 8.0, cy + a.sin() * 8.0, 1.8, WHITE, fade);
+                    g.circle(rx + a.cos() * 8.0, cy + a.sin() * 8.0, 1.8, pal.white, fade);
                 }
             }
             SKind::Done => {
-                g.circle(rx, cy, 11.0, WHITE, 1.0);
-                g.text(G_CHECK, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, 0x000000, 1.0);
+                g.circle(rx, cy, 11.0, pal.white, 1.0);
+                g.text(G_CHECK, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, pal.inv_ink, 1.0);
             }
             SKind::Error => {
-                g.circle(rx, cy, 13.0, WHITE, 0.14);
-                g.text(G_TERM, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, WHITE, 1.0);
+                g.circle(rx, cy, 13.0, pal.white, 0.14);
+                g.text(G_TERM, &g.f.icon_sm, rx - 11.0, cy - 11.0, 22.0, 22.0, pal.white, 1.0);
             }
         }
         self.hit(lx, y, tw, h, Hit::Pill);
     }
 
     fn draw_modal_tabs(&self, lx: f32, ry: f32, tabs: &[(&str, f32, Hit)], active: usize) {
+        let pal = self.pal();
         let mut cx = lx;
         for (i, &(label, w, hit_id)) in tabs.iter().enumerate() {
             let is_act = i == active;
             let hov = self.hov(hit_id);
-            let bg = if is_act { ACCENT } else if hov { CARD_HOV } else { CARD };
+            let bg = if is_act { pal.accent } else if hov { pal.card_hov } else { pal.card };
             let alpha = if is_act { 0.22 } else { 0.92 };
-            let border = if is_act { ACCENT } else { BORDER };
+            let border = if is_act { pal.accent } else { pal.border };
             self.gfx.rrect(cx, ry, w, 28.0, 7.0, bg, alpha);
             self.gfx.rrect_stroke(cx, ry, w, 28.0, 7.0, border, if is_act { 0.85 } else { 0.7 }, 1.0);
-            let tc = if is_act { WHITE } else { GRAY };
+            let tc = if is_act { pal.white } else { pal.gray };
             self.gfx.text(label, &self.gfx.f.sub_c, cx + 8.0, ry, w - 16.0, 28.0, tc, 1.0);
             self.hit(cx, ry, w, 28.0, hit_id);
             cx += w + 8.0;
@@ -1164,29 +1180,32 @@ impl App {
     }
 
     fn draw_vscroll(&self, x: f32, y: f32, h: f32, scroll: usize, visible: usize, total: usize) {
+        let pal = self.pal();
         if total <= visible || h <= 16.0 {
             return;
         }
-        self.gfx.rrect(x, y, 4.0, h, 2.0, WHITE, 0.08);
+        self.gfx.rrect(x, y, 4.0, h, 2.0, pal.white, 0.08);
         let max_scroll = total - visible;
         let thumb_h = ((visible as f32 / total as f32) * h).clamp(24.0, h);
         let frac = (scroll.min(max_scroll) as f32) / (max_scroll.max(1) as f32);
         let thumb_y = y + frac * (h - thumb_h);
-        self.gfx.rrect(x, thumb_y, 4.0, thumb_h, 2.0, GRAY, 0.55);
+        self.gfx.rrect(x, thumb_y, 4.0, thumb_h, 2.0, pal.gray, 0.55);
     }
 
     fn draw_footer_status(&self, lx: f32, y: f32, tw: f32, msg: &Option<(String, bool)>, fallback: &str) {
+        let pal = self.pal();
         if let Some((text, is_err)) = msg {
-            let col = if *is_err { RED } else { GREEN };
+            let col = if *is_err { pal.red } else { pal.green };
             self.gfx.rrect(lx, y, tw, 26.0, 6.0, col, 0.14);
             self.gfx.rrect_stroke(lx, y, tw, 26.0, 6.0, col, 0.45, 1.0);
             self.gfx.text(text, &self.gfx.f.tiny, lx + 12.0, y, tw - 24.0, 26.0, col, 1.0);
         } else {
-            self.gfx.text(fallback, &self.gfx.f.tiny, lx, y, tw, 26.0, DIM, 1.0);
+            self.gfx.text(fallback, &self.gfx.f.tiny, lx, y, tw, 26.0, pal.dim, 1.0);
         }
     }
 
     pub(crate) fn draw_env_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let proj_name = self.cfg.projects.get(self.env_proj_idx).map(|p| p.name.as_str()).unwrap_or("Proyecto");
         let env_file = if self.env_filename.is_empty() { ".env" } else { &self.env_filename };
@@ -1208,7 +1227,7 @@ impl App {
             mask_w,
             28.0,
             if self.env_masked { "Mostrar" } else { "Ocultar" },
-            if self.env_masked { ACCENT } else { AMBER },
+            if self.env_masked { pal.accent } else { pal.amber },
             true,
             Hit::EnvToggleMask,
         );
@@ -1218,7 +1237,7 @@ impl App {
             sync_w,
             28.0,
             "Sincronizar .env.example",
-            CYAN,
+            pal.cyan,
             true,
             Hit::EnvSyncExample,
         );
@@ -1232,9 +1251,9 @@ impl App {
             let val_w = (tw - key_w - save_w - 16.0).max(120.0);
             self.draw_input_box(lx, ry, key_w, 34.0, "CLAVE (ej. API_KEY)", &self.env_key_in, self.env_focus == 0, Hit::EnvKeyInput);
             self.draw_input_box(lx + key_w + 8.0, ry, val_w, 34.0, "Valor o pega KEY=VAL", &self.env_val_in, self.env_focus == 1, Hit::EnvValInput);
-            self.pill_action_btn(lx + tw - save_w, ry + 1.0, save_w, 32.0, "Guardar", GREEN, !self.env_key_in.trim().is_empty(), Hit::EnvSaveVar);
+            self.pill_action_btn(lx + tw - save_w, ry + 1.0, save_w, 32.0, "Guardar", pal.green, !self.env_key_in.trim().is_empty(), Hit::EnvSaveVar);
             ry += 40.0;
-            g.text("Tab cambia de campo | Puedes pegar texto con formato CLAVE=VALOR directamente", &g.f.tiny, lx, ry, tw, 16.0, DIM, 1.0);
+            g.text("Tab cambia de campo | Puedes pegar texto con formato CLAVE=VALOR directamente", &g.f.tiny, lx, ry, tw, 16.0, pal.dim, 1.0);
             ry += 22.0;
 
             let avail_h = (list_bottom - ry).max(45.0);
@@ -1242,19 +1261,19 @@ impl App {
             let vis = ((avail_h + 5.0) / step).floor().max(1.0) as usize;
 
             if self.env_vars.is_empty() {
-                g.rrect(lx, ry, tw, 64.0, 10.0, CARD, 0.85);
-                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, BORDER, 0.7, 1.0);
-                g.text("No hay variables en este archivo. Agrega una arriba o inyecta desde tu Boveda.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, GRAY, 1.0);
+                g.rrect(lx, ry, tw, 64.0, 10.0, pal.card, 0.85);
+                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, pal.border, 0.7, 1.0);
+                g.text("No hay variables en este archivo. Agrega una arriba o inyecta desde tu Boveda.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, pal.gray, 1.0);
             } else {
                 let row_w = if self.env_vars.len() > vis { tw - 12.0 } else { tw };
                 let max_s = self.env_vars.len().saturating_sub(vis);
                 let scroll = self.env_scroll.min(max_s);
                 for (r, (k, v)) in self.env_vars.iter().enumerate().skip(scroll).take(vis) {
                     let row_y = ry + (r - scroll) as f32 * step;
-                    g.rrect(lx, row_y, row_w, 40.0, 8.0, CARD, 0.90);
-                    g.rrect_stroke(lx, row_y, row_w, 40.0, 8.0, BORDER, 0.65, 1.0);
+                    g.rrect(lx, row_y, row_w, 40.0, 8.0, pal.card, 0.90);
+                    g.rrect_stroke(lx, row_y, row_w, 40.0, 8.0, pal.border, 0.65, 1.0);
 
-                    g.text(k, &g.f.body, lx + 14.0, row_y, 184.0, 40.0, CYAN, 1.0);
+                    g.text(k, &g.f.body, lx + 14.0, row_y, 184.0, 40.0, pal.cyan, 1.0);
                     let val_disp = if v.is_empty() {
                         "(vacio)".to_string()
                     } else if self.env_masked {
@@ -1262,22 +1281,22 @@ impl App {
                     } else {
                         v.clone()
                     };
-                    let val_col = if v.is_empty() { DIM } else if self.env_masked { GRAY } else { BODY };
+                    let val_col = if v.is_empty() { pal.dim } else if self.env_masked { pal.gray } else { pal.body };
                     g.text(&val_disp, &g.f.sub, lx + 204.0, row_y, (row_w - 344.0).max(80.0), 40.0, val_col, 1.0);
 
                     let bx = lx + row_w - 126.0;
                     let by = row_y + 7.0;
-                    self.mini_action_btn(bx, by, 26.0, G_COPY, CYAN, false, Hit::EnvCopyVal(r));
-                    self.mini_action_btn(bx + 30.0, by, 26.0, G_EDIT, ACCENT, false, Hit::EnvEditVar(r));
-                    self.mini_action_btn(bx + 60.0, by, 26.0, G_DOWNLOAD, AMBER, false, Hit::EnvSaveToVault(r));
-                    self.mini_action_btn(bx + 90.0, by, 26.0, G_TRASH, RED, false, Hit::EnvDeleteVar(r));
+                    self.mini_action_btn(bx, by, 26.0, G_COPY, pal.cyan, false, Hit::EnvCopyVal(r));
+                    self.mini_action_btn(bx + 30.0, by, 26.0, G_EDIT, pal.accent, false, Hit::EnvEditVar(r));
+                    self.mini_action_btn(bx + 60.0, by, 26.0, G_DOWNLOAD, pal.amber, false, Hit::EnvSaveToVault(r));
+                    self.mini_action_btn(bx + 90.0, by, 26.0, G_TRASH, pal.red, false, Hit::EnvDeleteVar(r));
                 }
                 self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.env_vars.len());
             }
         } else {
-            g.rrect(lx, ry, tw, 36.0, 8.0, CARD, 0.85);
-            g.rrect_stroke(lx, ry, tw, 36.0, 8.0, BORDER, 0.65, 1.0);
-            g.text("Claves personales persistentes. Haz clic en Inyectar para copiarlas al proyecto actual.", &g.f.sub, lx + 14.0, ry, tw - 28.0, 36.0, GRAY, 1.0);
+            g.rrect(lx, ry, tw, 36.0, 8.0, pal.card, 0.85);
+            g.rrect_stroke(lx, ry, tw, 36.0, 8.0, pal.border, 0.65, 1.0);
+            g.text("Claves personales persistentes. Haz clic en Inyectar para copiarlas al proyecto actual.", &g.f.sub, lx + 14.0, ry, tw - 28.0, 36.0, pal.gray, 1.0);
             ry += 44.0;
 
             let avail_h = (list_bottom - ry).max(45.0);
@@ -1285,19 +1304,19 @@ impl App {
             let vis = ((avail_h + 5.0) / step).floor().max(1.0) as usize;
 
             if self.cfg.env_vault.is_empty() {
-                g.rrect(lx, ry, tw, 64.0, 10.0, CARD, 0.85);
-                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, BORDER, 0.7, 1.0);
-                g.text("Tu Boveda esta vacia. Guarda variables desde la pestana Proyecto para reutilizarlas aqui.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, GRAY, 1.0);
+                g.rrect(lx, ry, tw, 64.0, 10.0, pal.card, 0.85);
+                g.rrect_stroke(lx, ry, tw, 64.0, 10.0, pal.border, 0.7, 1.0);
+                g.text("Tu Boveda esta vacia. Guarda variables desde la pestana Proyecto para reutilizarlas aqui.", &g.f.sub_c, lx + 16.0, ry + 22.0, tw - 32.0, 20.0, pal.gray, 1.0);
             } else {
                 let row_w = if self.cfg.env_vault.len() > vis { tw - 12.0 } else { tw };
                 let max_s = self.cfg.env_vault.len().saturating_sub(vis);
                 let scroll = self.env_scroll.min(max_s);
                 for (r, entry) in self.cfg.env_vault.iter().enumerate().skip(scroll).take(vis) {
                     let row_y = ry + (r - scroll) as f32 * step;
-                    g.rrect(lx, row_y, row_w, 40.0, 8.0, CARD, 0.90);
-                    g.rrect_stroke(lx, row_y, row_w, 40.0, 8.0, BORDER, 0.65, 1.0);
+                    g.rrect(lx, row_y, row_w, 40.0, 8.0, pal.card, 0.90);
+                    g.rrect_stroke(lx, row_y, row_w, 40.0, 8.0, pal.border, 0.65, 1.0);
 
-                    g.text(&entry.key, &g.f.body, lx + 14.0, row_y, 184.0, 40.0, AMBER, 1.0);
+                    g.text(&entry.key, &g.f.body, lx + 14.0, row_y, 184.0, 40.0, pal.amber, 1.0);
                     let val_disp = if entry.value.is_empty() {
                         "(vacio)".to_string()
                     } else if self.env_masked {
@@ -1305,11 +1324,11 @@ impl App {
                     } else {
                         entry.value.clone()
                     };
-                    g.text(&val_disp, &g.f.sub, lx + 204.0, row_y, (row_w - 342.0).max(80.0), 40.0, GRAY, 1.0);
+                    g.text(&val_disp, &g.f.sub, lx + 204.0, row_y, (row_w - 342.0).max(80.0), 40.0, pal.gray, 1.0);
 
                     let bx = lx + row_w - 124.0;
-                    self.pill_action_btn(bx, row_y + 7.0, 82.0, 26.0, "Inyectar", GREEN, true, Hit::EnvVaultInject(r));
-                    self.mini_action_btn(lx + row_w - 36.0, row_y + 7.0, 26.0, G_TRASH, RED, false, Hit::EnvVaultDelete(r));
+                    self.pill_action_btn(bx, row_y + 7.0, 82.0, 26.0, "Inyectar", pal.green, true, Hit::EnvVaultInject(r));
+                    self.mini_action_btn(lx + row_w - 36.0, row_y + 7.0, 26.0, G_TRASH, pal.red, false, Hit::EnvVaultDelete(r));
                 }
                 self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.cfg.env_vault.len());
             }
@@ -1319,6 +1338,7 @@ impl App {
     }
 
     pub(crate) fn draw_cleaner_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let total_bytes: u64 = self.clean_items.iter().map(|i| i.cache_bytes).sum();
         self.header(lx, y, tw, "Limpiador Inteligente y Recetas", "Inspecciona librerias, libera espacio y restaura con 1 clic", true);
@@ -1338,7 +1358,7 @@ impl App {
             clean_all_w,
             28.0,
             "Limpiar todo",
-            RED,
+            pal.red,
             !self.clean_items.is_empty() && !self.clean_scanning,
             Hit::CleanerCleanAll,
         );
@@ -1348,7 +1368,7 @@ impl App {
             rescan_w,
             28.0,
             "Reescanear",
-            CYAN,
+            pal.cyan,
             !self.clean_scanning,
             Hit::CleanerRescan,
         );
@@ -1358,21 +1378,21 @@ impl App {
 
         if self.clean_tab == 0 {
             if self.clean_scanning {
-                g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
-                g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
+                g.rrect(lx, ry, tw, area_h, 12.0, pal.card, 0.88);
+                g.rrect_stroke(lx, ry, tw, area_h, 12.0, pal.border, 0.7, 1.0);
                 let cx = lx + tw * 0.5;
                 let cy = ry + area_h * 0.42;
                 for i in 0..8 {
                     let a = i as f32 / 8.0 * std::f32::consts::TAU + self.spin * 5.0;
                     let fade = 0.2 + 0.8 * (i as f32 / 8.0);
-                    g.circle(cx + a.cos() * 14.0, cy + a.sin() * 14.0, 2.4, CYAN, fade);
+                    g.circle(cx + a.cos() * 14.0, cy + a.sin() * 14.0, 2.4, pal.cyan, fade);
                 }
-                g.text("Escaneando node_modules, target, .next, .venv y analizando librerias...", &g.f.sub_c, lx + 24.0, cy + 28.0, tw - 48.0, 22.0, WHITE, 1.0);
+                g.text("Escaneando node_modules, target, .next, .venv y analizando librerias...", &g.f.sub_c, lx + 24.0, cy + 28.0, tw - 48.0, 22.0, pal.white, 1.0);
             } else if self.clean_items.is_empty() {
-                g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
-                g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
-                g.text("No hay caches pesados detectados en tus proyectos.", &g.f.body, lx + 24.0, ry + 130.0, tw - 48.0, 24.0, GREEN, 1.0);
-                g.text("Si limpiaste alguno recientemente, revisa la pestana Recetas para restaurar sus dependencias.", &g.f.sub, lx + 24.0, ry + 160.0, tw - 48.0, 22.0, GRAY, 1.0);
+                g.rrect(lx, ry, tw, area_h, 12.0, pal.card, 0.88);
+                g.rrect_stroke(lx, ry, tw, area_h, 12.0, pal.border, 0.7, 1.0);
+                g.text("No hay caches pesados detectados en tus proyectos.", &g.f.body, lx + 24.0, ry + 130.0, tw - 48.0, 24.0, pal.green, 1.0);
+                g.text("Si limpiaste alguno recientemente, revisa la pestana Recetas para restaurar sus dependencias.", &g.f.sub, lx + 24.0, ry + 160.0, tw - 48.0, 22.0, pal.gray, 1.0);
             } else {
                 let left_w = 240.0;
                 let step = 50.0;
@@ -1385,16 +1405,16 @@ impl App {
                     let row_y = ry + (i - scroll) as f32 * step;
                     let sel = i == self.clean_sel_idx;
                     self.row_bg(lx, row_y, card_w, 46.0, Hit::CleanerSelectProj(i), sel);
-                    g.text(&item.project_name, &g.f.body, lx + 14.0, row_y + 6.0, card_w - 28.0, 18.0, WHITE, 1.0);
+                    g.text(&item.project_name, &g.f.body, lx + 14.0, row_y + 6.0, card_w - 28.0, 18.0, pal.white, 1.0);
                     let meta = format!("{}  |  {} objetivos", actions::format_bytes(item.cache_bytes), item.targets_found.len());
-                    g.text(&meta, &g.f.tiny, lx + 14.0, row_y + 26.0, card_w - 28.0, 15.0, AMBER, 1.0);
+                    g.text(&meta, &g.f.tiny, lx + 14.0, row_y + 26.0, card_w - 28.0, 15.0, pal.amber, 1.0);
                 }
                 self.draw_vscroll(lx + left_w - 5.0, ry, area_h, scroll, vis, self.clean_items.len());
 
                 let detail_x = lx + left_w + 12.0;
                 let detail_w = (tw - left_w - 12.0).max(200.0);
-                g.rrect(detail_x, ry, detail_w, area_h, 12.0, CARD, 0.92);
-                g.rrect_stroke(detail_x, ry, detail_w, area_h, 12.0, BORDER, 0.75, 1.0);
+                g.rrect(detail_x, ry, detail_w, area_h, 12.0, pal.card, 0.92);
+                g.rrect_stroke(detail_x, ry, detail_w, area_h, 12.0, pal.border, 0.75, 1.0);
 
                 let sel_idx = self.clean_sel_idx.min(self.clean_items.len() - 1);
                 if let Some(sel) = self.clean_items.get(sel_idx) {
@@ -1402,24 +1422,24 @@ impl App {
                     let inner_w = detail_w - 32.0;
                     let mut dy = ry + 14.0;
 
-                    g.text(&sel.project_name, &g.f.title, pad_x, dy, inner_w - 92.0, 22.0, WHITE, 1.0);
+                    g.text(&sel.project_name, &g.f.title, pad_x, dy, inner_w - 92.0, 22.0, pal.white, 1.0);
                     let sz_txt = actions::format_bytes(sel.cache_bytes);
-                    g.rrect(pad_x + inner_w - 82.0, dy, 82.0, 22.0, 6.0, AMBER, 0.16);
-                    g.text(&sz_txt, &g.f.badge, pad_x + inner_w - 82.0, dy, 82.0, 22.0, AMBER, 1.0);
+                    g.rrect(pad_x + inner_w - 82.0, dy, 82.0, 22.0, 6.0, pal.amber, 0.16);
+                    g.text(&sz_txt, &g.f.badge, pad_x + inner_w - 82.0, dy, 82.0, 22.0, pal.amber, 1.0);
                     dy += 24.0;
 
-                    g.text(&sel.project_path, &g.f.tiny, pad_x, dy, inner_w, 15.0, DIM, 1.0);
+                    g.text(&sel.project_path, &g.f.tiny, pad_x, dy, inner_w, 15.0, pal.dim, 1.0);
                     dy += 18.0;
 
-                    g.text("CARPETAS A ELIMINAR", &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    g.text("CARPETAS A ELIMINAR", &g.f.tiny, pad_x, dy, inner_w, 14.0, pal.gray, 1.0);
                     dy += 15.0;
                     let targets_str = sel.targets_found.join(", ");
-                    g.rrect(pad_x, dy, inner_w, 38.0, 7.0, WHITE, 0.04);
-                    g.text(&targets_str, &g.f.tiny, pad_x + 10.0, dy + 5.0, inner_w - 20.0, 28.0, RED, 1.0);
+                    g.rrect(pad_x, dy, inner_w, 38.0, 7.0, pal.white, 0.04);
+                    g.text(&targets_str, &g.f.tiny, pad_x + 10.0, dy + 5.0, inner_w - 20.0, 28.0, pal.red, 1.0);
                     dy += 46.0;
 
                     let lib_hdr = format!("LIBRERIAS QUE SE GUARDARAN EN RECETA ({})", sel.libraries_detected.len());
-                    g.text(&lib_hdr, &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    g.text(&lib_hdr, &g.f.tiny, pad_x, dy, inner_w, 14.0, pal.gray, 1.0);
                     dy += 15.0;
                     let libs_preview = if sel.libraries_detected.is_empty() {
                         "Solo artefactos de compilacion (sin dependencias externas declaradas)".to_string()
@@ -1432,28 +1452,28 @@ impl App {
                             shown.join(", ")
                         }
                     };
-                    g.rrect(pad_x, dy, inner_w, 100.0, 7.0, CYAN, 0.06);
-                    g.text(&libs_preview, &g.f.tiny, pad_x + 10.0, dy + 6.0, inner_w - 20.0, 88.0, CYAN, 1.0);
+                    g.rrect(pad_x, dy, inner_w, 100.0, 7.0, pal.cyan, 0.06);
+                    g.text(&libs_preview, &g.f.tiny, pad_x + 10.0, dy + 6.0, inner_w - 20.0, 88.0, pal.cyan, 1.0);
                     dy += 108.0;
 
-                    g.text("COMANDO DE RESTAURACION", &g.f.tiny, pad_x, dy, inner_w, 14.0, GRAY, 1.0);
+                    g.text("COMANDO DE RESTAURACION", &g.f.tiny, pad_x, dy, inner_w, 14.0, pal.gray, 1.0);
                     dy += 15.0;
                     let cmds = if sel.restore_commands.is_empty() {
                         "Sin reinstalacion requerida".to_string()
                     } else {
                         sel.restore_commands.join(" && ")
                     };
-                    g.rrect(pad_x, dy, inner_w, 34.0, 7.0, GREEN, 0.08);
-                    g.text(&cmds, &g.f.tiny, pad_x + 10.0, dy + 5.0, inner_w - 20.0, 24.0, GREEN, 1.0);
+                    g.rrect(pad_x, dy, inner_w, 34.0, 7.0, pal.green, 0.08);
+                    g.text(&cmds, &g.f.tiny, pad_x + 10.0, dy + 5.0, inner_w - 20.0, 24.0, pal.green, 1.0);
 
                     let btn_y = ry + area_h - 44.0;
-                    self.pill_action_btn(pad_x, btn_y, inner_w, 30.0, "Limpiar y guardar receta de restauracion", RED, true, Hit::CleanerCleanOne(sel_idx));
+                    self.pill_action_btn(pad_x, btn_y, inner_w, 30.0, "Limpiar y guardar receta de restauracion", pal.red, true, Hit::CleanerCleanOne(sel_idx));
                 }
             }
         } else if self.cfg.clean_manifests.is_empty() {
-            g.rrect(lx, ry, tw, area_h, 12.0, CARD, 0.88);
-            g.rrect_stroke(lx, ry, tw, area_h, 12.0, BORDER, 0.7, 1.0);
-            g.text("Aun no hay recetas guardadas. Al limpiar espacio, aqui veras que librerias tenia cada repo para reinstalarlas.", &g.f.sub_c, lx + 24.0, ry + 150.0, tw - 48.0, 36.0, GRAY, 1.0);
+            g.rrect(lx, ry, tw, area_h, 12.0, pal.card, 0.88);
+            g.rrect_stroke(lx, ry, tw, area_h, 12.0, pal.border, 0.7, 1.0);
+            g.text("Aun no hay recetas guardadas. Al limpiar espacio, aqui veras que librerias tenia cada repo para reinstalarlas.", &g.f.sub_c, lx + 24.0, ry + 150.0, tw - 48.0, 36.0, pal.gray, 1.0);
         } else {
             let step = 90.0;
             let vis = ((area_h + 6.0) / step).floor().max(1.0) as usize;
@@ -1463,15 +1483,15 @@ impl App {
 
             for (i, m) in self.cfg.clean_manifests.iter().enumerate().skip(scroll).take(vis) {
                 let row_y = ry + (i - scroll) as f32 * step;
-                g.rrect(lx, row_y, row_w, 84.0, 10.0, CARD, 0.92);
-                g.rrect_stroke(lx, row_y, row_w, 84.0, 10.0, BORDER, 0.7, 1.0);
+                g.rrect(lx, row_y, row_w, 84.0, 10.0, pal.card, 0.92);
+                g.rrect_stroke(lx, row_y, row_w, 84.0, 10.0, pal.border, 0.7, 1.0);
 
-                g.text(&m.project_name, &g.f.body, lx + 14.0, row_y + 8.0, 220.0, 20.0, WHITE, 1.0);
+                g.text(&m.project_name, &g.f.body, lx + 14.0, row_y + 8.0, 220.0, 20.0, pal.white, 1.0);
                 let badge = format!("Liberado: {} | {}", actions::format_bytes(m.freed_bytes), m.cleaned_at);
-                g.text(&badge, &g.f.tiny, lx + 240.0, row_y + 10.0, (row_w - 416.0).max(80.0), 16.0, AMBER, 1.0);
+                g.text(&badge, &g.f.tiny, lx + 240.0, row_y + 10.0, (row_w - 416.0).max(80.0), 16.0, pal.amber, 1.0);
 
                 let targets = format!("Eliminado: {}", m.targets_removed.join(", "));
-                g.text(&targets, &g.f.tiny, lx + 14.0, row_y + 30.0, row_w - 190.0, 15.0, GRAY, 1.0);
+                g.text(&targets, &g.f.tiny, lx + 14.0, row_y + 30.0, row_w - 190.0, 15.0, pal.gray, 1.0);
 
                 let libs_txt = if m.libraries_summary.is_empty() {
                     "Librerias: solo caches/compilacion".to_string()
@@ -1479,12 +1499,12 @@ impl App {
                     let preview: Vec<String> = m.libraries_summary.iter().take(6).cloned().collect();
                     format!("Librerias ({}): {}", m.libraries_summary.len(), preview.join(", "))
                 };
-                g.text(&libs_txt, &g.f.tiny, lx + 14.0, row_y + 47.0, row_w - 190.0, 15.0, CYAN, 1.0);
+                g.text(&libs_txt, &g.f.tiny, lx + 14.0, row_y + 47.0, row_w - 190.0, 15.0, pal.cyan, 1.0);
 
                 let cmd_txt = format!("Comando: {}", m.restore_commands.join(" && "));
-                g.text(&cmd_txt, &g.f.tiny, lx + 14.0, row_y + 64.0, row_w - 190.0, 15.0, DIM, 1.0);
+                g.text(&cmd_txt, &g.f.tiny, lx + 14.0, row_y + 64.0, row_w - 190.0, 15.0, pal.dim, 1.0);
 
-                self.pill_action_btn(lx + row_w - 162.0, row_y + 27.0, 148.0, 30.0, "Restaurar librerias", GREEN, true, Hit::CleanerRestore(i));
+                self.pill_action_btn(lx + row_w - 162.0, row_y + 27.0, 148.0, 30.0, "Restaurar librerias", pal.green, true, Hit::CleanerRestore(i));
             }
             self.draw_vscroll(lx + tw - 5.0, ry, area_h, scroll, vis, self.cfg.clean_manifests.len());
         }
@@ -1493,6 +1513,7 @@ impl App {
     }
 
     pub(crate) fn draw_console_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let active_src = self.con_sources.get(self.con_source_idx);
         let sub = active_src.map(|s| s.0.as_str()).unwrap_or("Sin logs activos");
@@ -1507,9 +1528,9 @@ impl App {
             let tx = lx + i as f32 * (tab_w + 8.0);
             let is_act = i == self.con_source_idx;
             let hov = self.hov(Hit::ConsoleSelectSource(i));
-            g.rrect(tx, ry, tab_w, 26.0, 6.0, if is_act { CYAN } else if hov { CARD_HOV } else { CARD }, if is_act { 0.20 } else { 0.90 });
-            g.rrect_stroke(tx, ry, tab_w, 26.0, 6.0, if is_act { CYAN } else { BORDER }, 0.75, 1.0);
-            g.text(&src.0, &g.f.tiny_c, tx + 8.0, ry, tab_w - 16.0, 26.0, if is_act { WHITE } else { GRAY }, 1.0);
+            g.rrect(tx, ry, tab_w, 26.0, 6.0, if is_act { pal.cyan } else if hov { pal.card_hov } else { pal.card }, if is_act { 0.20 } else { 0.90 });
+            g.rrect_stroke(tx, ry, tab_w, 26.0, 6.0, if is_act { pal.cyan } else { pal.border }, 0.75, 1.0);
+            g.text(&src.0, &g.f.tiny_c, tx + 8.0, ry, tab_w - 16.0, 26.0, if is_act { pal.white } else { pal.gray }, 1.0);
             self.hit(tx, ry, tab_w, 26.0, Hit::ConsoleSelectSource(i));
         }
 
@@ -1519,23 +1540,23 @@ impl App {
             && active_src
                 .map(|s| self.active_tasks.iter().any(|t| t.log_path == s.1))
                 .unwrap_or(false);
-        self.pill_action_btn(lx, ry, 152.0, 28.0, "Copiar ultimo error", RED, !self.con_lines.is_empty(), Hit::ConsoleCopyLastError);
-        self.pill_action_btn(lx + 160.0, ry, 102.0, 28.0, "Copiar todo", CYAN, !self.con_lines.is_empty(), Hit::ConsoleCopyAll);
-        self.pill_action_btn(lx + 270.0, ry, 84.0, 28.0, "Limpiar", AMBER, active_src.is_some(), Hit::ConsoleClear);
+        self.pill_action_btn(lx, ry, 152.0, 28.0, "Copiar ultimo error", pal.red, !self.con_lines.is_empty(), Hit::ConsoleCopyLastError);
+        self.pill_action_btn(lx + 160.0, ry, 102.0, 28.0, "Copiar todo", pal.cyan, !self.con_lines.is_empty(), Hit::ConsoleCopyAll);
+        self.pill_action_btn(lx + 270.0, ry, 84.0, 28.0, "Limpiar", pal.amber, active_src.is_some(), Hit::ConsoleClear);
         if has_srv {
-            self.pill_action_btn(lx + 362.0, ry, 144.0, 28.0, "Reiniciar servidor", GREEN, true, Hit::ConsoleRestartServer);
+            self.pill_action_btn(lx + 362.0, ry, 144.0, 28.0, "Reiniciar servidor", pal.green, true, Hit::ConsoleRestartServer);
         } else if has_task {
-            self.pill_action_btn(lx + 362.0, ry, 136.0, 28.0, "Detener proceso", RED, true, Hit::ConsoleStopTask);
+            self.pill_action_btn(lx + 362.0, ry, 136.0, 28.0, "Detener proceso", pal.red, true, Hit::ConsoleStopTask);
         }
-        self.pill_action_btn(lx + tw - 134.0, ry, 134.0, 28.0, "Terminal externa", GRAY, active_src.is_some(), Hit::ConsoleOpenExternal);
+        self.pill_action_btn(lx + tw - 134.0, ry, 134.0, 28.0, "Terminal externa", pal.gray, active_src.is_some(), Hit::ConsoleOpenExternal);
 
         ry += 36.0;
         let box_h = (y + 452.0 - ry).max(160.0);
-        g.rrect(lx, ry, tw, box_h, 10.0, 0x07090D, 0.96);
-        g.rrect_stroke(lx, ry, tw, box_h, 10.0, BORDER, 0.85, 1.0);
+        g.rrect(lx, ry, tw, box_h, 10.0, pal.box_bg, 0.96);
+        g.rrect_stroke(lx, ry, tw, box_h, 10.0, pal.border, 0.85, 1.0);
 
         if self.con_lines.is_empty() {
-            g.text("Esperando salida del proceso... Inicia un servidor, script o restauracion para verlo aqui.", &g.f.sub_c, lx + 20.0, ry + box_h * 0.45, tw - 40.0, 22.0, DIM, 1.0);
+            g.text("Esperando salida del proceso... Inicia un servidor, script o restauracion para verlo aqui.", &g.f.sub_c, lx + 20.0, ry + box_h * 0.45, tw - 40.0, 22.0, pal.dim, 1.0);
         } else {
             let line_h = 18.0;
             let max_vis = ((box_h - 16.0) / line_h).floor().max(1.0) as usize;
@@ -1547,15 +1568,15 @@ impl App {
                 let ly = ry + 8.0 + idx as f32 * line_h;
                 let lower = line.to_lowercase();
                 let col = if lower.contains("error") || lower.contains("err!") || lower.contains("failed") || lower.contains("fatal") || lower.contains("panic") || lower.contains("exception") || lower.contains("traceback") {
-                    RED
+                    pal.red
                 } else if lower.contains("warn") || lower.contains("deprecated") {
-                    AMBER
+                    pal.amber
                 } else if lower.contains("http://") || lower.contains("https://") || lower.starts_with("[isla-dev]") || lower.starts_with("---") {
-                    CYAN
+                    pal.cyan
                 } else if lower.contains("ready") || lower.contains("listening") || lower.contains("compiled") || lower.contains("success") || lower.contains("completad") {
-                    GREEN
+                    pal.green
                 } else {
-                    BODY
+                    pal.white
                 };
                 g.text(line, &g.f.tiny, lx + 14.0, ly, tw - 30.0, line_h, col, 1.0);
             }
@@ -1567,6 +1588,7 @@ impl App {
     }
 
     pub(crate) fn draw_runner_modal(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let proj = self.cfg.projects.get(self.run_proj_idx);
         let proj_name = proj.map(|p| p.name.as_str()).unwrap_or("Proyecto");
@@ -1578,12 +1600,12 @@ impl App {
         let lx = lx + 20.0;
         let tw = tw - 40.0;
         let mut ry = y + 68.0;
-        self.pill_action_btn(lx, ry, 130.0, 28.0, "Variables .env", CYAN, true, Hit::RunnerOpenEnv);
+        self.pill_action_btn(lx, ry, 130.0, 28.0, "Variables .env", pal.cyan, true, Hit::RunnerOpenEnv);
         if has_manifest {
-            self.pill_action_btn(lx + 138.0, ry, 232.0, 28.0, "Restaurar librerias eliminadas", GREEN, true, Hit::RunnerRestoreDeps);
+            self.pill_action_btn(lx + 138.0, ry, 232.0, 28.0, "Restaurar librerias eliminadas", pal.green, true, Hit::RunnerRestoreDeps);
         } else {
             let cnt = format!("{} comandos detectados en el proyecto", self.run_items.len());
-            g.text(&cnt, &g.f.sub, lx + 144.0, ry, tw - 150.0, 28.0, GRAY, 1.0);
+            g.text(&cnt, &g.f.sub, lx + 144.0, ry, tw - 150.0, 28.0, pal.gray, 1.0);
         }
 
         ry += 38.0;
@@ -1593,9 +1615,9 @@ impl App {
         let vis = ((avail_h + 4.0) / step).floor().max(1.0) as usize;
 
         if self.run_items.is_empty() {
-            g.rrect(lx, ry, tw, 72.0, 10.0, CARD, 0.88);
-            g.rrect_stroke(lx, ry, tw, 72.0, 10.0, BORDER, 0.7, 1.0);
-            g.text("No se detectaron scripts (package.json, Cargo.toml, Python o Docker) en este proyecto.", &g.f.sub_c, lx + 16.0, ry + 26.0, tw - 32.0, 22.0, GRAY, 1.0);
+            g.rrect(lx, ry, tw, 72.0, 10.0, pal.card, 0.88);
+            g.rrect_stroke(lx, ry, tw, 72.0, 10.0, pal.border, 0.7, 1.0);
+            g.text("No se detectaron scripts (package.json, Cargo.toml, Python o Docker) en este proyecto.", &g.f.sub_c, lx + 16.0, ry + 26.0, tw - 32.0, 22.0, pal.gray, 1.0);
         } else {
             let row_w = if self.run_items.len() > vis { tw - 12.0 } else { tw };
             let max_s = self.run_items.len().saturating_sub(vis);
@@ -1607,32 +1629,32 @@ impl App {
 
                 let cat_l = item.category.to_lowercase();
                 let badge_col = if cat_l.contains("batch") || cat_l.contains("prisma") {
-                    ACCENT
+                    pal.accent
                 } else if cat_l.contains("cargo") || cat_l.contains("rust") {
-                    AMBER
+                    pal.amber
                 } else if cat_l.contains("py") || cat_l.contains("django") {
-                    GREEN
+                    pal.green
                 } else {
-                    CYAN
+                    pal.cyan
                 };
                 g.rrect(lx + 12.0, row_y + 11.0, 68.0, 20.0, 5.0, badge_col, 0.16);
                 g.text(&item.category, &g.f.tiny_c, lx + 12.0, row_y + 11.0, 68.0, 20.0, badge_col, 1.0);
 
-                g.text(&item.label, &g.f.body, lx + 90.0, row_y + 4.0, row_w - 138.0, 18.0, WHITE, 1.0);
+                g.text(&item.label, &g.f.body, lx + 90.0, row_y + 4.0, row_w - 138.0, 18.0, pal.white, 1.0);
                 let sub = if item.subtitle.is_empty() { &item.command } else { &item.subtitle };
-                g.text(sub, &g.f.tiny, lx + 90.0, row_y + 22.0, row_w - 138.0, 15.0, DIM, 1.0);
+                g.text(sub, &g.f.tiny, lx + 90.0, row_y + 22.0, row_w - 138.0, 15.0, pal.dim, 1.0);
 
                 let expected_title = format!("{proj_name} · {}", item.label);
                 if let Some(t_idx) = self.active_tasks.iter().position(|t| t.title == expected_title) {
-                    self.mini_action_btn(lx + row_w - 36.0, row_y + 8.0, 26.0, G_STOP, RED, true, Hit::KillTask(t_idx));
+                    self.mini_action_btn(lx + row_w - 36.0, row_y + 8.0, 26.0, G_STOP, pal.red, true, Hit::KillTask(t_idx));
                 } else {
-                    g.text(G_PLAY, &g.f.icon_sm, lx + row_w - 34.0, row_y + 13.0, 20.0, 16.0, if hov { GREEN } else { GRAY }, 1.0);
+                    g.text(G_PLAY, &g.f.icon_sm, lx + row_w - 34.0, row_y + 13.0, 20.0, 16.0, if hov { pal.green } else { pal.gray }, 1.0);
                 }
             }
             self.draw_vscroll(lx + tw - 5.0, ry, avail_h, scroll, vis, self.run_items.len());
         }
 
-        g.text("Haz clic en un comando para ejecutarlo en vivo dentro de la Consola | Ctrl+R | Esc: Volver", &g.f.tiny, lx, y + 444.0, tw, 24.0, DIM, 1.0);
+        g.text("Haz clic en un comando para ejecutarlo en vivo dentro de la Consola | Ctrl+R | Esc: Volver", &g.f.tiny, lx, y + 444.0, tw, 24.0, pal.dim, 1.0);
     }
 }
 

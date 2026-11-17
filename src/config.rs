@@ -19,6 +19,8 @@ pub struct Config {
     pub position: String,
     #[serde(default = "d_true")]
     pub sounds_enabled: bool,
+    #[serde(default = "d_true")]
+    pub light_mode: bool,
     #[serde(default = "d_workspaces")]
     pub workspaces: Vec<WorkspaceDef>,
     #[serde(default)]
@@ -344,6 +346,7 @@ default_launcher = "antigravity"
 hide_on_fullscreen = true
 monitor_mode = "primary"
 position = "top_center"
+light_mode = true
 
 [[launchers]]
 id = "antigravity"

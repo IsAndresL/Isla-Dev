@@ -4,7 +4,9 @@ use crate::config::hex;
 
 impl App {
     pub(crate) fn draw(&self) {
+        let pal = self.pal();
         let g = &self.gfx;
+        g.light.set(pal.light);
         let (w, h, r) = (self.sw.x.max(30.0), self.sh.x.max(8.0), self.sr.x.max(3.0));
         let (x, y) = self.panel_origin(w, h);
         let pos = self.island_pos();
@@ -16,16 +18,18 @@ impl App {
         if is_compact {
             let glow_t = self.glow_anim.clamp(0.0, 1.0);
             let border_col = if self.has_live_server() {
-                GREEN
+                pal.green
             } else if self.glow_anim > 0.01 {
-                GLACIER
+                pal.glacier
             } else {
-                GLACIER
+                pal.glacier
             };
             let border_alpha = if self.glow_anim > 0.01 {
-                0.35 + 0.35 * glow_t
+                0.45 + 0.35 * glow_t
             } else if self.has_live_server() {
-                0.42
+                0.55
+            } else if pal.light {
+                0.48
             } else {
                 0.24
             };
@@ -36,57 +40,57 @@ impl App {
                     g.draw_glow_ring(cx, w, h, glow_t);
                 }
                 if let Ok(path) = g.waterdrop_path(cx, w, h) {
-                    g.fill_path(&path, BODY, 1.0);
+                    g.fill_path(&path, pal.body, 1.0);
                 }
                 if let Ok(curve) = g.waterdrop_curve_path(cx, w, h) {
                     g.stroke_path(&curve, border_col, border_alpha, 1.0);
                 }
                 if let Some(prog) = self.bg_progress {
-                    g.draw_waterdrop_progress(cx, w, h, prog, GREEN);
+                    g.draw_waterdrop_progress(cx, w, h, prog, pal.green);
                 }
             } else {
                 // Cápsula / píldora flotante para esquinas o borde inferior (#E4002B + Azul Glaciar + Blanco Polar)
                 if self.glow_anim > 0.01 {
-                    g.rrect_stroke(x - 4.0, y - 4.0, w + 8.0, h + 8.0, r + 4.0, CYAN, 0.22 * glow_t, 2.2);
-                    g.rrect_stroke(x - 2.0, y - 2.0, w + 4.0, h + 4.0, r + 2.0, BRAND_RED, 0.42 * glow_t, 1.6);
+                    g.rrect_stroke(x - 4.0, y - 4.0, w + 8.0, h + 8.0, r + 4.0, pal.cyan, 0.22 * glow_t, 2.2);
+                    g.rrect_stroke(x - 2.0, y - 2.0, w + 4.0, h + 4.0, r + 2.0, pal.brand_red, 0.42 * glow_t, 1.6);
                 }
-                g.rrect(x - 1.5, y + 1.0, w + 3.0, h + 3.0, r + 1.5, 0x000000, 0.52);
-                g.rrect(x, y, w, h, r, BODY, 1.0);
+                g.rrect(x - 1.5, y + 1.0, w + 3.0, h + 3.0, r + 1.5, pal.shadow, if pal.light { 0.16 } else { 0.52 });
+                g.rrect(x, y, w, h, r, pal.body, 1.0);
                 g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, border_col, border_alpha, 1.0);
                 if let Some(prog) = self.bg_progress {
                     let f = prog.clamp(0.05, 1.0);
                     g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
-                    g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.95, 2.0);
+                    g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, pal.green, 0.95, 2.0);
                     g.unclip();
                 }
             }
         } else if is_waterdrop {
             if let Ok(shadow) = g.top_panel_path(x - 2.0, w + 4.0, h + 3.0, r + 2.0) {
-                g.fill_path(&shadow, 0x000000, 0.55);
+                g.fill_path(&shadow, pal.shadow, if pal.light { 0.14 } else { 0.55 });
             }
             if let Ok(panel) = g.top_panel_path(x, w, h, r) {
-                g.fill_path(&panel, BODY, 0.99);
+                g.fill_path(&panel, pal.body, 0.99);
             }
             if let Ok(border) = g.top_panel_curve_path(x + 0.5, w - 1.0, h - 0.5, r) {
-                g.stroke_path(&border, GLACIER, 0.22, 1.0);
+                g.stroke_path(&border, pal.glacier, if pal.light { 0.40 } else { 0.22 }, 1.0);
                 if let Some(prog) = self.bg_progress {
                     let f = prog.clamp(0.05, 1.0);
                     g.clip(x - 2.0, y, (w + 4.0) * f, h + 6.0);
-                    g.stroke_path(&border, GREEN, 0.30, 4.5);
-                    g.stroke_path(&border, GREEN, 0.95, 2.0);
+                    g.stroke_path(&border, pal.green, 0.30, 4.5);
+                    g.stroke_path(&border, pal.green, 0.95, 2.0);
                     g.unclip();
                 }
             }
         } else {
             // Panel flotante con las 4 esquinas redondeadas para esquinas y zona inferior
-            g.rrect(x - 2.0, y - 1.0, w + 4.0, h + 5.0, r + 2.0, 0x000000, 0.55);
-            g.rrect(x, y, w, h, r, BODY, 0.99);
-            g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GLACIER, 0.22, 1.0);
+            g.rrect(x - 2.0, y - 1.0, w + 4.0, h + 5.0, r + 2.0, pal.shadow, if pal.light { 0.14 } else { 0.55 });
+            g.rrect(x, y, w, h, r, pal.body, 0.99);
+            g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, pal.glacier, if pal.light { 0.40 } else { 0.22 }, 1.0);
             if let Some(prog) = self.bg_progress {
                 let f = prog.clamp(0.05, 1.0);
                 g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
-                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.30, 4.5);
-                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GREEN, 0.95, 2.0);
+                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, pal.green, 0.30, 4.5);
+                g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, pal.green, 0.95, 2.0);
                 g.unclip();
             }
         }
@@ -124,6 +128,7 @@ impl App {
     }
 
     pub(crate) fn draw_compact(&self, x: f32, y: f32, w: f32, h: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let pos = self.island_pos();
         let is_waterdrop = pos.is_waterdrop();
@@ -135,19 +140,19 @@ impl App {
             let dot_r = if expanded_pill { 3.4 } else { 2.6 };
             let positions = self.compact_dot_positions(x, y, w, h, srv_count, dot_r);
             for (dx, dy) in positions {
-                g.circle(dx, dy, dot_r + 1.8, GREEN, 0.25);
-                g.circle(dx, dy, dot_r, GREEN, 1.0);
+                g.circle(dx, dy, dot_r + 1.8, pal.green, 0.25);
+                g.circle(dx, dy, dot_r, pal.green, 1.0);
             }
         } else if !is_waterdrop {
             if expanded_pill {
-                g.circle(x + 12.0, y + h / 2.0, 3.0, BRAND_RED, 1.0);
-                g.text("Isla Dev", &g.f.badge, x + 21.0, y, w - 26.0, h, WHITE, 0.96);
+                g.circle(x + 12.0, y + h / 2.0, 3.0, pal.brand_red, 1.0);
+                g.text("Isla Dev", &g.f.badge, x + 21.0, y, w - 26.0, h, pal.white, 0.96);
             } else {
-                g.circle(x + w / 2.0 - 9.0, y + h / 2.0, 2.2, BRAND_RED, 0.95);
-                g.rrect(x + w / 2.0 - 3.0, y + h / 2.0 - 1.5, 13.0, 3.0, 1.5, GLACIER, 0.85);
+                g.circle(x + w / 2.0 - 9.0, y + h / 2.0, 2.2, pal.brand_red, 0.95);
+                g.rrect(x + w / 2.0 - 3.0, y + h / 2.0 - 1.5, 13.0, 3.0, 1.5, pal.glacier, 0.85);
             }
         } else if expanded_pill {
-            g.circle(x + w / 2.0, y + h / 2.0, 2.4, BRAND_RED, 0.95);
+            g.circle(x + w / 2.0, y + h / 2.0, 2.4, pal.brand_red, 0.95);
         }
 
         // Superficie con alpha mínimo (1/255, invisible al ojo) para capturar siempre el primer clic/hover.
@@ -157,7 +162,7 @@ impl App {
             let cx = x + w / 2.0;
             let hit_w = if expanded_pill { w.max(88.0) } else { (w + 10.0).max(56.0) };
             let hit_h = if expanded_pill { h.max(24.0) } else { (h + 4.0).max(14.0) };
-            g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, BODY, 0.006);
+            g.rrect(cx - hit_w / 2.0, 0.0, hit_w, hit_h, 12.0, pal.body, 0.006);
             g.alpha.set(prev_a);
             self.hit(cx - hit_w / 2.0, 0.0, hit_w, hit_h, Hit::Pill);
         } else {
@@ -165,13 +170,14 @@ impl App {
             let hy = y - 4.0;
             let hw = w + 8.0;
             let hh = h + 8.0;
-            g.rrect(hx, hy, hw, hh, hh / 2.0, BODY, 0.006);
+            g.rrect(hx, hy, hw, hh, hh / 2.0, pal.body, 0.006);
             g.alpha.set(prev_a);
             self.hit(hx, hy, hw, hh, Hit::Pill);
         }
     }
 
     pub(crate) fn draw_expanded(&self, lx: f32, y: f32, tw: f32) {
+        let pal = self.pal();
         let g = &self.gfx;
         let srv_count = self.active_server_count();
         let open_count = self.open_windows.len();
@@ -207,8 +213,8 @@ impl App {
         if !self.active_ports.is_empty() || !self.active_tasks.is_empty() {
             let mut px = lx + 96.0;
             if !self.active_ports.is_empty() {
-                g.circle(lx + 24.0, cur_y + 12.0, 3.8, GREEN, 1.0);
-                g.text("PUERTOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, GRAY, 1.0);
+                g.circle(lx + 24.0, cur_y + 12.0, 3.8, pal.green, 1.0);
+                g.text("PUERTOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, pal.gray, 1.0);
                 for &port in self.active_ports.iter().take(7) {
                     let label = format!(":{port}");
                     let pw = 88.0;
@@ -222,11 +228,11 @@ impl App {
                         pw,
                         bh,
                         7.0,
-                        GREEN,
+                        pal.green,
                         if hov_open || hov_term { 0.22 } else { 0.12 },
                     );
-                    g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, GREEN, 0.45, 1.0);
-                    g.text(&label, &g.f.badge, px + 7.0, cur_y + 1.0, 42.0, bh, GREEN, 1.0);
+                    g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, pal.green, 0.45, 1.0);
+                    g.text(&label, &g.f.badge, px + 7.0, cur_y + 1.0, 42.0, bh, pal.green, 1.0);
                     self.hit(px, cur_y + 1.0, 45.0, bh, Hit::PortBadge(port));
 
                     g.rrect(
@@ -235,7 +241,7 @@ impl App {
                         18.0,
                         18.0,
                         4.0,
-                        WHITE,
+                        pal.white,
                         if hov_term { 0.18 } else { 0.0 },
                     );
                     g.text(
@@ -245,7 +251,7 @@ impl App {
                         cur_y + 1.0,
                         18.0,
                         bh,
-                        if hov_term { WHITE } else { GREEN },
+                        if hov_term { pal.white } else { pal.green },
                         0.95,
                     );
                     self.hit(px + 46.0, cur_y + 1.0, 18.0, bh, Hit::PortTerm(port));
@@ -257,15 +263,15 @@ impl App {
                         cur_y + 1.0,
                         19.0,
                         bh,
-                        if hov_kill { RED } else { GRAY },
+                        if hov_kill { pal.red } else { pal.gray },
                         0.9,
                     );
                     self.hit(px + pw - 21.0, cur_y + 1.0, 20.0, bh, Hit::KillPort(port));
                     px += pw + 6.0;
                 }
             } else {
-                g.circle(lx + 24.0, cur_y + 12.0, 3.8, CYAN, 1.0);
-                g.text("ACTIVOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, GRAY, 1.0);
+                g.circle(lx + 24.0, cur_y + 12.0, 3.8, pal.cyan, 1.0);
+                g.text("ACTIVOS:", &g.f.tiny, lx + 34.0, cur_y, 65.0, 24.0, pal.gray, 1.0);
             }
 
             for (ti, task) in self.active_tasks.iter().enumerate() {
@@ -282,11 +288,11 @@ impl App {
                     pw,
                     bh,
                     7.0,
-                    CYAN,
+                    pal.cyan,
                     if hov_log { 0.24 } else { 0.12 },
                 );
-                g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, CYAN, 0.45, 1.0);
-                g.text(&task.short_label, &g.f.tiny, px + 8.0, cur_y + 1.0, pw - 30.0, bh, CYAN, 1.0);
+                g.rrect_stroke(px, cur_y + 1.0, pw, bh, 7.0, pal.cyan, 0.45, 1.0);
+                g.text(&task.short_label, &g.f.tiny, px + 8.0, cur_y + 1.0, pw - 30.0, bh, pal.cyan, 1.0);
                 self.hit(px, cur_y + 1.0, pw - 22.0, bh, Hit::TaskLog(ti));
 
                 g.text(
@@ -296,7 +302,7 @@ impl App {
                     cur_y + 1.0,
                     19.0,
                     bh,
-                    if hov_kill { RED } else { GRAY },
+                    if hov_kill { pal.red } else { pal.gray },
                     0.9,
                 );
                 self.hit(px + pw - 21.0, cur_y + 1.0, 20.0, bh, Hit::KillTask(ti));
@@ -310,22 +316,22 @@ impl App {
         let sb_w = tw - 32.0;
         let sb_h = 34.0;
         let has_q = !self.search.is_empty();
-        g.rrect(sb_x, cur_y, sb_w, sb_h, 10.0, CARD, 1.0);
+        g.rrect(sb_x, cur_y, sb_w, sb_h, 10.0, pal.card, 1.0);
         g.rrect_stroke(
             sb_x + 0.5,
             cur_y + 0.5,
             sb_w - 1.0,
             sb_h - 1.0,
             10.0,
-            if has_q { CYAN } else { BORDER },
+            if has_q { pal.cyan } else { pal.border },
             if has_q { 0.65 } else { 0.85 },
             1.0,
         );
-        g.text(G_SEARCH, &g.f.icon_sm, sb_x + 8.0, cur_y, 24.0, sb_h, GLACIER, 0.9);
+        g.text(G_SEARCH, &g.f.icon_sm, sb_x + 8.0, cur_y, 24.0, sb_h, pal.glacier, 0.9);
         if has_q {
-            g.text(&self.search, &g.f.body, sb_x + 34.0, cur_y, sb_w - 68.0, sb_h, WHITE, 1.0);
+            g.text(&self.search, &g.f.body, sb_x + 34.0, cur_y, sb_w - 68.0, sb_h, pal.white, 1.0);
             let tx = (sb_x + 34.0 + g.measure(&self.search, &g.f.body) + 1.5).min(sb_x + sb_w - 36.0);
-            g.line(tx, cur_y + 8.0, tx, cur_y + sb_h - 8.0, CYAN, 0.95, 1.4);
+            g.line(tx, cur_y + 8.0, tx, cur_y + sb_h - 8.0, pal.cyan, 0.95, 1.4);
             let clr_hov = self.hov(Hit::ClearSearch);
             g.text(
                 G_CLOSE,
@@ -334,7 +340,7 @@ impl App {
                 cur_y,
                 26.0,
                 sb_h,
-                if clr_hov { WHITE } else { GRAY },
+                if clr_hov { pal.white } else { pal.gray },
                 1.0,
             );
             self.hit(sb_x + sb_w - 30.0, cur_y, 26.0, sb_h, Hit::ClearSearch);
@@ -346,7 +352,7 @@ impl App {
                 cur_y,
                 sb_w - 220.0,
                 sb_h,
-                DIM,
+                pal.dim,
                 1.0,
             );
             // Keycaps discretos a la derecha del buscador: [↑↓] [↵ Abrir] [Ctrl N]
@@ -354,9 +360,9 @@ impl App {
             for keycap in &["Ctrl N", "↵ Abrir", "↑↓"] {
                 let kw = g.measure(keycap, &g.f.tiny) + 12.0;
                 kx -= kw;
-                g.rrect(kx, cur_y + 7.0, kw, 20.0, 5.0, WHITE, 0.05);
-                g.rrect_stroke(kx, cur_y + 7.0, kw, 20.0, 5.0, BORDER, 0.85, 1.0);
-                g.text(keycap, &g.f.tiny_c, kx, cur_y + 7.0, kw, 20.0, DIM, 0.95);
+                g.rrect(kx, cur_y + 7.0, kw, 20.0, 5.0, pal.white, 0.05);
+                g.rrect_stroke(kx, cur_y + 7.0, kw, 20.0, 5.0, pal.border, 0.85, 1.0);
+                g.text(keycap, &g.f.tiny_c, kx, cur_y + 7.0, kw, 20.0, pal.dim, 0.95);
                 kx -= 5.0;
             }
         }
@@ -381,7 +387,7 @@ impl App {
                 cw,
                 chip_h,
                 7.0,
-                if active { BRAND_RED } else { CARD },
+                if active { pal.brand_red } else { pal.card },
                 if active { 0.22 } else if hov { 0.95 } else { 0.75 },
             );
             g.rrect_stroke(
@@ -390,11 +396,11 @@ impl App {
                 cw - 1.0,
                 chip_h - 1.0,
                 7.0,
-                if active { BRAND_RED } else if hov { GLACIER } else { BORDER },
+                if active { pal.brand_red } else if hov { pal.glacier } else { pal.border },
                 if active { 0.85 } else { 0.65 },
                 1.0,
             );
-            let txt_col = if active || hov { WHITE } else { GRAY };
+            let txt_col = if active || hov { pal.white } else { pal.gray };
             g.text(&label, &g.f.tiny_c, row1_x, cur_y, cw, chip_h, txt_col, 1.0);
             self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(FilterMode::All));
             row1_x += cw + 6.0;
@@ -415,7 +421,7 @@ impl App {
                 cw,
                 chip_h,
                 7.0,
-                if active { ACCENT } else { CARD },
+                if active { pal.accent } else { pal.card },
                 if active { 0.18 } else if hov { 0.95 } else { 0.75 },
             );
             g.rrect_stroke(
@@ -424,11 +430,11 @@ impl App {
                 cw - 1.0,
                 chip_h - 1.0,
                 7.0,
-                if active || hov { ACCENT } else { BORDER },
+                if active || hov { pal.accent } else { pal.border },
                 if active { 0.85 } else { 0.65 },
                 1.0,
             );
-            let txt_col = if active { ACCENT } else if hov { WHITE } else { GRAY };
+            let txt_col = if active { pal.accent } else if hov { pal.white } else { pal.gray };
             g.text(&w.icon, &g.f.icon_xs, row1_x + 5.0, cur_y, 14.0, chip_h, txt_col, 0.95);
             g.text(&label, &g.f.tiny, row1_x + 20.0, cur_y, cw - 24.0, chip_h, txt_col, 1.0);
             self.hit(row1_x, cur_y, cw, chip_h, Hit::FilterChip(FilterMode::Workspace(k)));
@@ -444,7 +450,7 @@ impl App {
             add_btn_w,
             chip_h,
             7.0,
-            CARD,
+            pal.card,
             if add_hov { 0.95 } else { 0.6 },
         );
         g.rrect_stroke(
@@ -453,11 +459,11 @@ impl App {
             add_btn_w - 1.0,
             chip_h - 1.0,
             7.0,
-            if add_hov { WHITE } else { BORDER },
+            if add_hov { pal.white } else { pal.border },
             if add_hov { 0.8 } else { 0.5 },
             1.0,
         );
-        g.text(G_ADD, &g.f.icon, row1_x, cur_y - 1.0, add_btn_w, chip_h, if add_hov { WHITE } else { GRAY }, 1.0);
+        g.text(G_ADD, &g.f.icon, row1_x, cur_y - 1.0, add_btn_w, chip_h, if add_hov { pal.white } else { pal.gray }, 1.0);
         self.hit(row1_x, cur_y, add_btn_w, chip_h, Hit::AddWorkspace);
         row1_x += add_btn_w + 6.0;
 
@@ -469,10 +475,10 @@ impl App {
                 let cw = (g.measure(&clone_lbl, &g.f.tiny) + 29.0).min(max_clone_w);
                 let cx_btn = lx + tw - 16.0 - cw;
                 let hov = self.hov(Hit::CloneClipboardRepo);
-                g.rrect(cx_btn, cur_y, cw, chip_h, 7.0, GREEN, if hov { 0.25 } else { 0.14 });
-                g.rrect_stroke(cx_btn + 0.5, cur_y + 0.5, cw - 1.0, chip_h - 1.0, 7.0, GREEN, 0.65, 1.0);
-                g.text(G_DOWNLOAD, &g.f.icon_xs, cx_btn + 5.0, cur_y, 14.0, chip_h, GREEN, 1.0);
-                g.text(&clone_lbl, &g.f.tiny, cx_btn + 20.0, cur_y, cw - 24.0, chip_h, GREEN, 1.0);
+                g.rrect(cx_btn, cur_y, cw, chip_h, 7.0, pal.green, if hov { 0.25 } else { 0.14 });
+                g.rrect_stroke(cx_btn + 0.5, cur_y + 0.5, cw - 1.0, chip_h - 1.0, 7.0, pal.green, 0.65, 1.0);
+                g.text(G_DOWNLOAD, &g.f.icon_xs, cx_btn + 5.0, cur_y, 14.0, chip_h, pal.green, 1.0);
+                g.text(&clone_lbl, &g.f.tiny, cx_btn + 20.0, cur_y, cw - 24.0, chip_h, pal.green, 1.0);
                 self.hit(cx_btn, cur_y, cw, chip_h, Hit::CloneClipboardRepo);
             }
         }
@@ -488,25 +494,25 @@ impl App {
             (
                 FilterMode::Pinned,
                 format!("Fijados ({pinned_total})"),
-                WHITE,
+                pal.white,
                 Some(G_PIN),
             ),
             (
                 FilterMode::GitDirty,
                 format!("Cambios Git ({dirty_total})"),
-                if dirty_total > 0 { AMBER } else { GRAY },
+                if dirty_total > 0 { pal.amber } else { pal.gray },
                 None,
             ),
             (
                 FilterMode::RunningServer,
                 format!("Con Servidor ({srv_count})"),
-                if srv_count > 0 { GREEN } else { GRAY },
+                if srv_count > 0 { pal.green } else { pal.gray },
                 Some(G_BOLT),
             ),
             (
                 FilterMode::FullStack,
                 format!("Full-Stack ({fs_total})"),
-                CYAN,
+                pal.cyan,
                 Some(G_LINK),
             ),
         ];
@@ -521,7 +527,7 @@ impl App {
                 cw,
                 chip_h,
                 7.0,
-                if active { *accent_col } else { CARD },
+                if active { *accent_col } else { pal.card },
                 if active {
                     0.18
                 } else if hov {
@@ -536,16 +542,16 @@ impl App {
                 cw - 1.0,
                 chip_h - 1.0,
                 7.0,
-                if active || hov { *accent_col } else { BORDER },
+                if active || hov { *accent_col } else { pal.border },
                 if active { 0.75 } else { 0.65 },
                 1.0,
             );
             let txt_col = if active {
                 *accent_col
             } else if hov {
-                WHITE
+                pal.white
             } else {
-                GRAY
+                pal.gray
             };
             if let Some(glyph) = glyph_opt {
                 g.text(glyph, &g.f.icon_xs, row2_x + 6.0, cur_y, 14.0, chip_h, txt_col, 0.95);
@@ -586,13 +592,13 @@ impl App {
 
         if filtered.is_empty() {
             let empty_h = 3.0 * 54.0 - 6.0;
-            g.rrect(lx + 16.0, ry, left_w - 24.0, empty_h, 14.0, CARD, 0.5);
+            g.rrect(lx + 16.0, ry, left_w - 24.0, empty_h, 14.0, pal.card, 0.5);
             let msg = if self.cfg.projects.is_empty() {
                 "No tienes proyectos aún · Crea el primero abajo"
             } else {
                 "Sin resultados para este filtro · Pulsa Esc para limpiar"
             };
-            g.text(msg, &g.f.sub_c, lx + 16.0, ry, left_w - 24.0, empty_h, GRAY, 1.0);
+            g.text(msg, &g.f.sub_c, lx + 16.0, ry, left_w - 24.0, empty_h, pal.gray, 1.0);
             ry += 3.0 * 54.0;
         } else {
             for (vis_pos, &i) in filtered.iter().enumerate().skip(sc).take(MAX_ROWS) {
@@ -610,7 +616,7 @@ impl App {
                     row_w,
                     row_h,
                     13.0,
-                    if row_hov || is_sel { CARD_HOV } else { CARD },
+                    if row_hov || is_sel { pal.card_hov } else { pal.card },
                     1.0,
                 );
                 let stack_col = hex(&p.color);
@@ -628,7 +634,7 @@ impl App {
                     // Barra vertical de acento (3px) en el color oficial de su stack
                     g.rrect(row_x + 2.5, ry + 8.0, 3.2, row_h - 16.0, 1.6, stack_col, 0.95);
                 } else {
-                    g.rrect_stroke(row_x + 0.5, ry + 0.5, row_w - 1.0, row_h - 1.0, 13.0, BORDER, 0.65, 1.0);
+                    g.rrect_stroke(row_x + 0.5, ry + 0.5, row_w - 1.0, row_h - 1.0, 13.0, pal.border, 0.65, 1.0);
                 }
                 self.hit(row_x, ry, row_w, row_h, Hit::Project(i));
 
@@ -659,16 +665,16 @@ impl App {
                         btn_y,
                         26.0,
                         G_PIN,
-                        if p.pinned { WHITE } else { GRAY },
+                        if p.pinned { pal.white } else { pal.gray },
                         p.pinned,
                         Hit::ProjPin(i),
                     );
 
                     rx -= 29.0;
-                    self.mini_action_btn(rx, btn_y, 26.0, G_FOLDER, GRAY, false, Hit::ProjExplorer(i));
+                    self.mini_action_btn(rx, btn_y, 26.0, G_FOLDER, pal.gray, false, Hit::ProjExplorer(i));
 
                     rx -= 29.0;
-                    self.mini_action_btn(rx, btn_y, 26.0, G_TERM, GRAY, false, Hit::ProjTerm(i));
+                    self.mini_action_btn(rx, btn_y, 26.0, G_TERM, pal.gray, false, Hit::ProjTerm(i));
 
                     rx -= 29.0;
                     self.mini_action_btn(
@@ -676,7 +682,7 @@ impl App {
                         btn_y,
                         26.0,
                         G_EDIT,
-                        if p.note.is_some() { CYAN } else { GRAY },
+                        if p.note.is_some() { pal.cyan } else { pal.gray },
                         p.note.is_some(),
                         Hit::ProjNote(i),
                     );
@@ -691,13 +697,13 @@ impl App {
                         btn_y,
                         26.0,
                         G_KEY,
-                        if has_env { CYAN } else { GRAY },
+                        if has_env { pal.cyan } else { pal.gray },
                         has_env,
                         Hit::ProjEnv(i),
                     );
 
                     rx -= 29.0;
-                    self.mini_action_btn(rx, btn_y, 26.0, G_BOLT, WHITE, false, Hit::ProjRunner(i));
+                    self.mini_action_btn(rx, btn_y, 26.0, G_BOLT, pal.white, false, Hit::ProjRunner(i));
 
                     // Botón de Git con icono vectorial real de rama Git (nunca ▯)
                     let is_dirty = git_info.map(|g| g.dirty).unwrap_or(false);
@@ -709,7 +715,7 @@ impl App {
                         26.0,
                         btn_h,
                         8.0,
-                        if is_dirty { AMBER } else { WHITE },
+                        if is_dirty { pal.amber } else { pal.white },
                         if git_hov {
                             0.18
                         } else if is_dirty {
@@ -725,11 +731,11 @@ impl App {
                         btn_h - 1.0,
                         8.0,
                         if is_dirty {
-                            AMBER
+                            pal.amber
                         } else if git_hov {
-                            WHITE
+                            pal.white
                         } else {
-                            BORDER
+                            pal.border
                         },
                         if git_hov || is_dirty { 0.7 } else { 0.85 },
                         1.0,
@@ -739,16 +745,16 @@ impl App {
                         btn_y + 6.0,
                         14.0,
                         if is_dirty {
-                            AMBER
+                            pal.amber
                         } else if git_hov {
-                            WHITE
+                            pal.white
                         } else {
-                            GRAY
+                            pal.gray
                         },
                         1.0,
                     );
                     if is_dirty {
-                        g.circle(rx + 21.0, btn_y + 5.0, 2.8, AMBER, 1.0);
+                        g.circle(rx + 21.0, btn_y + 5.0, 2.8, pal.amber, 1.0);
                     }
                     self.hit(rx, btn_y, 26.0, btn_h, Hit::ProjGit(i));
 
@@ -773,7 +779,7 @@ impl App {
                                 30.0,
                                 btn_h,
                                 "2x",
-                                if both_on { GREEN } else { CYAN },
+                                if both_on { pal.green } else { pal.cyan },
                                 both_on,
                                 Hit::ProjServerRole(i, ServerRole::Both),
                             );
@@ -792,7 +798,7 @@ impl App {
                                 bw,
                                 btn_h,
                                 &b_lbl,
-                                if b_srv.is_some() { CYAN } else { GRAY },
+                                if b_srv.is_some() { pal.cyan } else { pal.gray },
                                 b_srv.is_some(),
                                 Hit::ProjServerRole(i, ServerRole::Back),
                             );
@@ -811,16 +817,16 @@ impl App {
                                 fw,
                                 btn_h,
                                 &f_lbl,
-                                if f_srv.is_some() { GREEN } else { GRAY },
+                                if f_srv.is_some() { pal.green } else { pal.gray },
                                 f_srv.is_some(),
                                 Hit::ProjServerRole(i, ServerRole::Front),
                             );
                         }
                     } else if let Some(srv) = self.servers.get(&p.path) {
                         rx -= 31.0;
-                        self.mini_action_btn(rx, btn_y, 28.0, G_STOP, RED, true, Hit::ProjServer(i));
+                        self.mini_action_btn(rx, btn_y, 28.0, G_STOP, pal.red, true, Hit::ProjServer(i));
                         rx -= 31.0;
-                        self.mini_action_btn(rx, btn_y, 28.0, G_TERM, GREEN, true, Hit::ProjServerTerm(i));
+                        self.mini_action_btn(rx, btn_y, 28.0, G_TERM, pal.green, true, Hit::ProjServerTerm(i));
                         let port_txt = srv
                             .port
                             .map(|pt| format!("● :{pt}"))
@@ -831,16 +837,16 @@ impl App {
                             .port
                             .map(|pt| Hit::ProjPort(i, pt))
                             .unwrap_or(Hit::ProjServerTerm(i));
-                        self.pill_action_btn(rx, btn_y, pw, btn_h, &port_txt, GREEN, true, hit_id);
+                        self.pill_action_btn(rx, btn_y, pw, btn_h, &port_txt, pal.green, true, hit_id);
                     } else if fs_info.and_then(|f| f.main.as_ref()).is_some() {
                         rx -= 32.0;
-                        self.mini_action_btn(rx, btn_y, 28.0, G_PLAY, GREEN, false, Hit::ProjServer(i));
+                        self.mini_action_btn(rx, btn_y, 28.0, G_PLAY, pal.green, false, Hit::ProjServer(i));
                     }
                 } else {
                     // --- FILA EN REPOSO (Estilo Linear / Raycast): Solo mostrar indicadores activos sin ruido de cajas ---
                     if p.pinned {
                         rx -= 24.0;
-                        g.text(G_PIN, &g.f.icon_sm, rx, btn_y, 22.0, btn_h, GRAY, 0.75);
+                        g.text(G_PIN, &g.f.icon_sm, rx, btn_y, 22.0, btn_h, pal.gray, 0.75);
                         self.hit(rx, btn_y, 22.0, btn_h, Hit::ProjPin(i));
                     }
 
@@ -849,10 +855,10 @@ impl App {
                             let badge_txt = format!("{}", git.changed_count.max(1));
                             let gw = 38.0;
                             rx -= gw + 4.0;
-                            g.rrect(rx, btn_y + 3.0, gw, 22.0, 6.0, AMBER, 0.12);
-                            g.rrect_stroke(rx, btn_y + 3.0, gw, 22.0, 6.0, AMBER, 0.45, 1.0);
-                            g.draw_git_branch_icon(rx + 5.0, btn_y + 7.5, 12.0, AMBER, 0.95);
-                            g.text(&badge_txt, &g.f.tiny, rx + 19.0, btn_y + 3.0, gw - 21.0, 22.0, AMBER, 1.0);
+                            g.rrect(rx, btn_y + 3.0, gw, 22.0, 6.0, pal.amber, 0.12);
+                            g.rrect_stroke(rx, btn_y + 3.0, gw, 22.0, 6.0, pal.amber, 0.45, 1.0);
+                            g.draw_git_branch_icon(rx + 5.0, btn_y + 7.5, 12.0, pal.amber, 0.95);
+                            g.text(&badge_txt, &g.f.tiny, rx + 19.0, btn_y + 3.0, gw - 21.0, 22.0, pal.amber, 1.0);
                             self.hit(rx, btn_y, gw, btn_h, Hit::ProjGit(i));
                         }
                     }
@@ -873,7 +879,7 @@ impl App {
                                     52.0,
                                     24.0,
                                     &lbl,
-                                    CYAN,
+                                    pal.cyan,
                                     true,
                                     Hit::ProjServerRole(i, ServerRole::Back),
                                 );
@@ -891,7 +897,7 @@ impl App {
                                     52.0,
                                     24.0,
                                     &lbl,
-                                    GREEN,
+                                    pal.green,
                                     true,
                                     Hit::ProjServerRole(i, ServerRole::Front),
                                 );
@@ -908,7 +914,7 @@ impl App {
                             .port
                             .map(|pt| Hit::ProjPort(i, pt))
                             .unwrap_or(Hit::ProjServerTerm(i));
-                        self.pill_action_btn(rx, btn_y + 2.0, pw, 24.0, &port_txt, GREEN, true, hit_id);
+                        self.pill_action_btn(rx, btn_y + 2.0, pw, 24.0, &port_txt, pal.green, true, hit_id);
                     }
                 }
 
@@ -918,15 +924,15 @@ impl App {
 
                 // Línea 1: Nombre del proyecto + Micro-cápsula verde independiente si está abierto en un IDE
                 let name_w = g.measure(&p.name, &g.f.body).min(max_text_w - 10.0);
-                g.text(&p.name, &g.f.body, text_x, ry + 5.0, name_w + 6.0, 20.0, WHITE, 1.0);
+                g.text(&p.name, &g.f.body, text_x, ry + 5.0, name_w + 6.0, 20.0, pal.white, 1.0);
 
                 let mut badge_l1_x = text_x + name_w + 8.0;
                 if !open_progs.is_empty() && badge_l1_x + 56.0 < rx {
                     let prog_txt = open_progs[0];
                     let pw = (g.measure(prog_txt, &g.f.tiny) + 18.0).min(rx - badge_l1_x - 4.0);
-                    g.rrect(badge_l1_x, ry + 6.5, pw, 17.0, 8.5, GREEN, 0.14);
-                    g.rrect_stroke(badge_l1_x, ry + 6.5, pw, 17.0, 8.5, GREEN, 0.45, 1.0);
-                    g.circle(badge_l1_x + 7.0, ry + 15.0, 2.5, GREEN, 1.0);
+                    g.rrect(badge_l1_x, ry + 6.5, pw, 17.0, 8.5, pal.green, 0.14);
+                    g.rrect_stroke(badge_l1_x, ry + 6.5, pw, 17.0, 8.5, pal.green, 0.45, 1.0);
+                    g.circle(badge_l1_x + 7.0, ry + 15.0, 2.5, pal.green, 1.0);
                     g.text(
                         prog_txt,
                         &g.f.tiny,
@@ -934,7 +940,7 @@ impl App {
                         ry + 6.5,
                         pw - 15.0,
                         17.0,
-                        GREEN,
+                        pal.green,
                         1.0,
                     );
                     badge_l1_x += pw + 6.0;
@@ -951,7 +957,7 @@ impl App {
                 let rel_act = actions::relative_time_string(p.last_opened, &p.path);
                 let meta_label = format!("{stack_label} · {rel_act}");
                 let st_w = g.measure(&meta_label, &g.f.sub).min(max_text_w);
-                g.text(&meta_label, &g.f.sub, text_x, sub_y, st_w + 4.0, 18.0, GRAY, 0.95);
+                g.text(&meta_label, &g.f.sub, text_x, sub_y, st_w + 4.0, 18.0, pal.gray, 0.95);
                 let mut m_x = text_x + st_w + 8.0;
 
                 // Micro-badge de Grupo de Trabajo (Workspace)
@@ -960,16 +966,16 @@ impl App {
                     if let Some(w) = ws_item {
                         let wsw = (g.measure(&w.name, &g.f.tiny) + 23.0).min(115.0);
                         if m_x + wsw < rx {
-                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
-                            g.text(&w.icon, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, WHITE, 0.9);
-                            g.text(&w.name, &g.f.tiny, m_x + 17.0, sub_y + 1.0, wsw - 20.0, 16.0, WHITE, 0.9);
+                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, pal.white, 0.08);
+                            g.text(&w.icon, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, pal.white, 0.9);
+                            g.text(&w.name, &g.f.tiny, m_x + 17.0, sub_y + 1.0, wsw - 20.0, 16.0, pal.white, 0.9);
                             m_x += wsw + 6.0;
                         }
                     } else {
                         let wsw = (g.measure(ws, &g.f.tiny) + 12.0).min(110.0);
                         if m_x + wsw < rx {
-                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, WHITE, 0.08);
-                            g.text(ws, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, WHITE, 0.9);
+                            g.rrect(m_x, sub_y + 1.0, wsw, 16.0, 5.0, pal.white, 0.08);
+                            g.text(ws, &g.f.tiny_c, m_x, sub_y + 1.0, wsw, 16.0, pal.white, 0.9);
                             m_x += wsw + 6.0;
                         }
                     }
@@ -979,14 +985,14 @@ impl App {
                 if let Some(git) = git_info {
                     let br_w = (g.measure(&git.branch, &g.f.tiny) + 21.0).min(110.0);
                     if m_x + br_w < rx {
-                        let br_col = if git.dirty { AMBER } else { GRAY };
+                        let br_col = if git.dirty { pal.amber } else { pal.gray };
                         g.rrect(
                             m_x,
                             sub_y + 1.0,
                             br_w,
                             16.0,
                             5.0,
-                            if git.dirty { AMBER } else { WHITE },
+                            if git.dirty { pal.amber } else { pal.white },
                             if git.dirty { 0.14 } else { 0.06 },
                         );
                         g.draw_git_branch_icon(m_x + 4.5, sub_y + 3.5, 11.0, br_col, 0.95);
@@ -1007,8 +1013,8 @@ impl App {
                 // Micro-badge Full-Stack si tiene Front + Back
                 if is_fullstack && m_x + 56.0 < rx {
                     let fsw = 54.0;
-                    g.rrect(m_x, sub_y + 1.0, fsw, 16.0, 5.0, CYAN, 0.12);
-                    g.text("Full-Stack", &g.f.tiny_c, m_x, sub_y + 1.0, fsw, 16.0, CYAN, 0.95);
+                    g.rrect(m_x, sub_y + 1.0, fsw, 16.0, 5.0, pal.cyan, 0.12);
+                    g.text("Full-Stack", &g.f.tiny_c, m_x, sub_y + 1.0, fsw, 16.0, pal.cyan, 0.95);
                     m_x += fsw + 6.0;
                 }
 
@@ -1031,11 +1037,11 @@ impl App {
                             nw,
                             16.0,
                             5.0,
-                            CYAN,
+                            pal.cyan,
                             if note_hov { 0.28 } else { 0.13 },
                         );
-                        g.text(G_EDIT, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, CYAN, 0.95);
-                        g.text(&note_lbl, &g.f.tiny, m_x + 17.0, sub_y + 1.0, nw - 20.0, 16.0, CYAN, 0.95);
+                        g.text(G_EDIT, &g.f.icon_xs, m_x + 3.0, sub_y + 1.0, 14.0, 16.0, pal.cyan, 0.95);
+                        g.text(&note_lbl, &g.f.tiny, m_x + 17.0, sub_y + 1.0, nw - 20.0, 16.0, pal.cyan, 0.95);
                     }
                 }
 
@@ -1048,21 +1054,21 @@ impl App {
             let track_x = lx + left_w - 5.0;
             let track_y = list_top_y + 4.0;
             let track_h = (MAX_ROWS as f32) * 54.0 - 14.0;
-            g.rrect(track_x, track_y, 3.0, track_h, 1.5, WHITE, 0.07);
+            g.rrect(track_x, track_y, 3.0, track_h, 1.5, pal.white, 0.07);
             let ratio = (MAX_ROWS as f32) / (filtered.len() as f32);
             let thumb_h = (track_h * ratio).max(24.0);
             let max_scroll = (filtered.len() - MAX_ROWS).max(1) as f32;
             let thumb_y = track_y + (track_h - thumb_h) * (sc as f32 / max_scroll);
-            g.rrect(track_x, thumb_y, 3.0, thumb_h, 1.5, GRAY, 0.65);
+            g.rrect(track_x, thumb_y, 3.0, thumb_h, 1.5, pal.gray, 0.65);
         }
 
         // Botón inferior izquierdo: Crear nuevo proyecto
         ry += 4.0;
         let new_btn_h = 46.0;
         self.row_bg(lx + 16.0, ry, left_w - 24.0, new_btn_h, Hit::NewProject, false);
-        g.rrect(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, BRAND_RED, 0.22);
-        g.rrect_stroke(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, BRAND_RED, 0.78, 1.0);
-        g.text(G_ADD, &g.f.icon, lx + 24.0, ry + 7.0, 32.0, 32.0, WHITE, 1.0);
+        g.rrect(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, pal.brand_red, if pal.light { 0.95 } else { 0.22 });
+        g.rrect_stroke(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, pal.brand_red, 0.85, 1.0);
+        g.text(G_ADD, &g.f.icon, lx + 24.0, ry + 7.0, 32.0, 32.0, if pal.light { 0xFFFFFF } else { pal.white }, 1.0);
         g.text(
             "Crear nuevo proyecto",
             &g.f.body,
@@ -1070,12 +1076,12 @@ impl App {
             ry,
             left_w - 165.0,
             new_btn_h,
-            WHITE,
+            pal.white,
             1.0,
         );
-        g.rrect(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, CARD_HOV, 1.0);
-        g.rrect_stroke(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, GLACIER, 0.42, 1.0);
-        g.text("Ctrl N", &g.f.badge, lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, GRAY, 1.0);
+        g.rrect(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, pal.card_hov, 1.0);
+        g.rrect_stroke(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, pal.glacier, 0.42, 1.0);
+        g.text("Ctrl N", &g.f.badge, lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, pal.gray, 1.0);
 
         let left_bottom_y = ry + new_btn_h;
 
@@ -1095,14 +1101,14 @@ impl App {
         }
         .min(total_right_h - 115.0);
 
-        g.rrect(right_x, list_top_y, panel_w, top_card_h, 14.0, CARD, 0.65);
+        g.rrect(right_x, list_top_y, panel_w, top_card_h, 14.0, pal.card, 0.65);
         g.rrect_stroke(
             right_x + 0.5,
             list_top_y + 0.5,
             panel_w - 1.0,
             top_card_h - 1.0,
             14.0,
-            BORDER,
+            pal.border,
             0.7,
             1.0,
         );
@@ -1111,7 +1117,7 @@ impl App {
             right_x + 14.0,
             list_top_y + 16.0,
             3.5,
-            if self.open_windows.is_empty() { DIM } else { GREEN },
+            if self.open_windows.is_empty() { pal.dim } else { pal.green },
             1.0,
         );
         let open_hdr = format!("ABIERTOS AHORA ({})", self.open_windows.len());
@@ -1122,7 +1128,7 @@ impl App {
             list_top_y + 4.0,
             panel_w - 30.0,
             24.0,
-            GRAY,
+            pal.gray,
             1.0,
         );
 
@@ -1135,7 +1141,7 @@ impl App {
                 oy + 4.0,
                 panel_w - 20.0,
                 20.0,
-                GRAY,
+                pal.gray,
                 0.85,
             );
             g.text(
@@ -1145,7 +1151,7 @@ impl App {
                 oy + 24.0,
                 panel_w - 20.0,
                 16.0,
-                DIM,
+                pal.dim,
                 0.9,
             );
         } else {
@@ -1161,7 +1167,7 @@ impl App {
                     card_w,
                     card_h,
                     10.0,
-                    if hov_focus { CARD_HOV } else { BODY },
+                    if hov_focus { pal.card_hov } else { pal.body },
                     0.85,
                 );
                 g.rrect_stroke(
@@ -1170,7 +1176,7 @@ impl App {
                     card_w - 1.0,
                     card_h - 1.0,
                     10.0,
-                    if hov_focus { GREEN } else { BORDER },
+                    if hov_focus { pal.green } else { pal.border },
                     if hov_focus { 0.55 } else { 0.65 },
                     1.0,
                 );
@@ -1182,7 +1188,7 @@ impl App {
                     oy + 3.0,
                     card_w - 68.0,
                     19.0,
-                    WHITE,
+                    pal.white,
                     1.0,
                 );
                 g.text(
@@ -1192,7 +1198,7 @@ impl App {
                     oy + 21.0,
                     card_w - 68.0,
                     16.0,
-                    GREEN,
+                    pal.green,
                     0.95,
                 );
                 self.hit(card_x, oy, card_w - 28.0, card_h, Hit::OpenWinFocus(idx));
@@ -1203,7 +1209,7 @@ impl App {
                     20.0,
                     24.0,
                     6.0,
-                    RED,
+                    pal.red,
                     if hov_close { 0.22 } else { 0.0 },
                 );
                 g.text(
@@ -1213,7 +1219,7 @@ impl App {
                     oy + 9.0,
                     20.0,
                     24.0,
-                    if hov_close { RED } else { GRAY },
+                    if hov_close { pal.red } else { pal.gray },
                     0.9,
                 );
                 self.hit(card_x + card_w - 25.0, oy + 7.0, 22.0, 28.0, Hit::OpenWinClose(idx));
@@ -1225,14 +1231,14 @@ impl App {
         let bot_card_y = list_top_y + top_card_h + 8.0;
         let bot_card_h = (left_bottom_y - bot_card_y).max(90.0);
 
-        g.rrect(right_x, bot_card_y, panel_w, bot_card_h, 14.0, CARD, 0.65);
+        g.rrect(right_x, bot_card_y, panel_w, bot_card_h, 14.0, pal.card, 0.65);
         g.rrect_stroke(
             right_x + 0.5,
             bot_card_y + 0.5,
             panel_w - 1.0,
             bot_card_h - 1.0,
             14.0,
-            BORDER,
+            pal.border,
             0.7,
             1.0,
         );
@@ -1243,7 +1249,7 @@ impl App {
             right_x + 14.0,
             bot_card_y + 16.0,
             3.5,
-            if has_srvs { GREEN } else { CYAN },
+            if has_srvs { pal.green } else { pal.cyan },
             1.0,
         );
         let bot_hdr = if has_live {
@@ -1258,7 +1264,7 @@ impl App {
             bot_card_y + 4.0,
             panel_w - 30.0,
             24.0,
-            GRAY,
+            pal.gray,
             1.0,
         );
 
@@ -1273,24 +1279,24 @@ impl App {
             let sx = right_x + 7.0;
             let sw = panel_w - 14.0;
             let sh = 36.0;
-            g.rrect(sx, by, sw, sh, 9.0, BODY, 0.85);
-            g.rrect_stroke(sx + 0.5, by + 0.5, sw - 1.0, sh - 1.0, 9.0, GREEN, 0.35, 1.0);
-            g.circle(sx + 10.0, by + 18.0, 3.2, GREEN, 1.0);
+            g.rrect(sx, by, sw, sh, 9.0, pal.body, 0.85);
+            g.rrect_stroke(sx + 0.5, by + 0.5, sw - 1.0, sh - 1.0, 9.0, pal.green, 0.35, 1.0);
+            g.circle(sx + 10.0, by + 18.0, 3.2, pal.green, 1.0);
             let title = if srv.label == "Main" {
                 srv.project_name.clone()
             } else {
                 format!("{} · {}", srv.project_name, srv.label)
             };
-            g.text(&title, &g.f.badge, sx + 18.0, by + 2.0, sw - 74.0, 17.0, WHITE, 1.0);
+            g.text(&title, &g.f.badge, sx + 18.0, by + 2.0, sw - 74.0, 17.0, pal.white, 1.0);
             let port_str = srv
                 .port
                 .map(|pt| format!("localhost:{pt}"))
                 .unwrap_or_else(|| "Iniciando…".into());
-            g.text(&port_str, &g.f.tiny, sx + 18.0, by + 18.0, sw - 74.0, 15.0, GREEN, 0.95);
+            g.text(&port_str, &g.f.tiny, sx + 18.0, by + 18.0, sw - 74.0, 15.0, pal.green, 0.95);
             if let Some(pt) = srv.port {
                 self.hit(sx, by, sw - 48.0, sh, Hit::PortBadge(pt));
-                self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, GREEN, false, Hit::PortTerm(pt));
-                self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, RED, false, Hit::KillPort(pt));
+                self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, pal.green, false, Hit::PortTerm(pt));
+                self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, pal.red, false, Hit::KillPort(pt));
             }
             by += 40.0;
         }
@@ -1303,14 +1309,14 @@ impl App {
             let sx = right_x + 7.0;
             let sw = panel_w - 14.0;
             let sh = 36.0;
-            g.rrect(sx, by, sw, sh, 9.0, BODY, 0.85);
-            g.rrect_stroke(sx + 0.5, by + 0.5, sw - 1.0, sh - 1.0, 9.0, CYAN, 0.40, 1.0);
-            g.circle(sx + 10.0, by + 18.0, 3.2, CYAN, 1.0);
-            g.text(&task.short_label, &g.f.badge, sx + 18.0, by + 2.0, sw - 74.0, 17.0, WHITE, 1.0);
-            g.text("Ejecutando en vivo…", &g.f.tiny, sx + 18.0, by + 18.0, sw - 74.0, 15.0, CYAN, 0.95);
+            g.rrect(sx, by, sw, sh, 9.0, pal.body, 0.85);
+            g.rrect_stroke(sx + 0.5, by + 0.5, sw - 1.0, sh - 1.0, 9.0, pal.cyan, 0.40, 1.0);
+            g.circle(sx + 10.0, by + 18.0, 3.2, pal.cyan, 1.0);
+            g.text(&task.short_label, &g.f.badge, sx + 18.0, by + 2.0, sw - 74.0, 17.0, pal.white, 1.0);
+            g.text("Ejecutando en vivo…", &g.f.tiny, sx + 18.0, by + 18.0, sw - 74.0, 15.0, pal.cyan, 0.95);
             self.hit(sx, by, sw - 48.0, sh, Hit::TaskLog(ti));
-            self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, CYAN, false, Hit::TaskLog(ti));
-            self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, RED, false, Hit::KillTask(ti));
+            self.mini_action_btn(sx + sw - 46.0, by + 6.0, 20.0, G_TERM, pal.cyan, false, Hit::TaskLog(ti));
+            self.mini_action_btn(sx + sw - 23.0, by + 6.0, 20.0, G_STOP, pal.red, false, Hit::KillTask(ti));
             by += 40.0;
         }
 
@@ -1321,7 +1327,7 @@ impl App {
                 G_DOWNLOAD,
                 format!("Clonar {repo_name}"),
                 "URL de GitHub en portapapeles".into(),
-                GREEN,
+                pal.green,
                 Hit::CloneClipboardRepo,
             ));
         }
@@ -1334,35 +1340,35 @@ impl App {
             } else {
                 "Libera GB guardando receta 1-clic".into()
             },
-            AMBER,
+            pal.amber,
             Hit::OpenDiskCleaner,
         ));
         quick_actions.push((
             G_TERM,
             "Consola de logs en vivo".into(),
             "Errores, servidores y copiar para IA".into(),
-            GREEN,
+            pal.green,
             Hit::OpenLiveConsole,
         ));
         quick_actions.push((
             G_FOLDER,
             "Abrir carpeta raíz".into(),
             actions::short(&self.cfg.base_dir),
-            WHITE,
+            pal.white,
             Hit::QuickOpenBaseDir,
         ));
         quick_actions.push((
             G_EDIT,
             "Librerías y Programas".into(),
             "Agregar IDEs, stacks o paquetes".into(),
-            CYAN,
+            pal.cyan,
             Hit::OpenCustomEditor,
         ));
         quick_actions.push((
             G_SYNC,
             "Sincronizar carpetas".into(),
             "Actualizar proyectos del disco".into(),
-            GRAY,
+            pal.gray,
             Hit::QuickSyncProjects,
         ));
 
@@ -1380,7 +1386,7 @@ impl App {
                 qw,
                 qh,
                 9.0,
-                if hov { CARD_HOV } else { BODY },
+                if hov { pal.card_hov } else { pal.body },
                 if hov { 0.95 } else { 0.72 },
             );
             g.rrect_stroke(
@@ -1389,39 +1395,40 @@ impl App {
                 qw - 1.0,
                 qh - 1.0,
                 9.0,
-                if hov { col } else { BORDER },
+                if hov { col } else { pal.border },
                 if hov { 0.55 } else { 0.6 },
                 1.0,
             );
             g.text(icon, &g.f.icon_sm, qx + 6.0, by, 24.0, qh, col, 0.95);
-            g.text(&title, &g.f.badge, qx + 32.0, by + 3.0, qw - 38.0, 17.0, WHITE, 1.0);
-            g.text(&desc, &g.f.tiny, qx + 32.0, by + 19.0, qw - 38.0, 15.0, DIM, 0.95);
+            g.text(&title, &g.f.badge, qx + 32.0, by + 3.0, qw - 38.0, 17.0, pal.white, 1.0);
+            g.text(&desc, &g.f.tiny, qx + 32.0, by + 19.0, qw - 38.0, 15.0, pal.dim, 0.95);
             self.hit(qx, by, qw, qh, hit_id);
             by += 42.0;
         }
     }
 
     pub(crate) fn header(&self, lx: f32, y: f32, tw: f32, title: &str, sub: &str, back: bool) {
+        let pal = self.pal();
         let g = &self.gfx;
         if back {
             self.icon_btn(lx + 16.0, y + 15.0, G_BACK, Hit::Back);
-            g.text(title, &g.f.title, lx + 56.0, y + 13.0, tw - 140.0, 20.0, WHITE, 1.0);
-            g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, GLACIER, 0.92);
+            g.text(title, &g.f.title, lx + 56.0, y + 13.0, tw - 140.0, 20.0, pal.white, 1.0);
+            g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, pal.glacier, 0.92);
             self.icon_btn(lx + tw - 44.0, y + 15.0, G_CLOSE, Hit::Close);
-            g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
-            g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
+            g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, pal.border, 0.85, 1.0);
+            g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, pal.brand_red, 0.95, 1.8);
         } else {
             // Izquierda: Logo grande protagonista (58x58) + halo dual + "Isla Dev" y "Mis Proyectos" debajo
             let logo_s = 58.0;
             let logo_x = lx + 16.0;
             let logo_y = y + 10.0;
-            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 34.0, GLACIER, 0.11);
-            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 30.0, BRAND_RED, 0.24);
+            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 34.0, pal.glacier, 0.11);
+            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 30.0, pal.brand_red, 0.24);
             g.draw_logo(logo_x, logo_y, logo_s, logo_s, 1.0);
 
             let tx = lx + 86.0;
-            g.text(title, &g.f.brand, tx, y + 14.0, 240.0, 24.0, WHITE, 1.0);
-            g.text(sub, &g.f.sub, tx, y + 41.0, 265.0, 18.0, GLACIER, 0.96);
+            g.text(title, &g.f.brand, tx, y + 14.0, 240.0, 24.0, pal.white, 1.0);
+            g.text(sub, &g.f.sub, tx, y + 41.0, 265.0, 18.0, pal.glacier, 0.96);
 
             // Zona decorativa central-derecha: líneas rojas #E4002B escalonadas de larga a corta
             let lines_x = lx + 362.0;
@@ -1429,27 +1436,34 @@ impl App {
             let l1 = max_lw.min(280.0);
             let l2 = (l1 * 0.64).max(70.0);
             let l3 = (l1 * 0.34).max(40.0);
-            g.rrect(lines_x, y + 23.0, l1, 3.5, 1.75, BRAND_RED, 0.95);
-            g.rrect(lines_x + l1 + 6.0, y + 23.0, 18.0, 3.5, 1.75, GLACIER, 0.72);
-            g.rrect(lines_x, y + 35.0, l2, 3.5, 1.75, BRAND_RED, 0.75);
-            g.rrect(lines_x, y + 47.0, l3, 3.5, 1.75, BRAND_RED, 0.52);
-            g.rrect(lines_x + l3 + 6.0, y + 47.0, 10.0, 3.5, 1.75, WHITE, 0.65);
+            g.rrect(lines_x, y + 23.0, l1, 3.5, 1.75, pal.brand_red, 0.95);
+            g.rrect(lines_x + l1 + 6.0, y + 23.0, 18.0, 3.5, 1.75, pal.glacier, 0.72);
+            g.rrect(lines_x, y + 35.0, l2, 3.5, 1.75, pal.brand_red, 0.75);
+            g.rrect(lines_x, y + 47.0, l3, 3.5, 1.75, pal.brand_red, 0.52);
+            g.rrect(lines_x + l3 + 6.0, y + 47.0, 10.0, 3.5, 1.75, pal.white, 0.65);
 
-            // Derecha: Ajustes y Cerrar
+            // Derecha: Tema Blanco/Oscuro, Ajustes y Cerrar
+            self.icon_btn(
+                lx + tw - 116.0,
+                y + 24.0,
+                if pal.light { G_MOON } else { G_SUN },
+                Hit::ToggleTheme,
+            );
             self.icon_btn(lx + tw - 80.0, y + 24.0, G_GEAR, Hit::Settings);
             self.icon_btn(lx + tw - 44.0, y + 24.0, G_CLOSE, Hit::Close);
 
             // Línea divisoria con acento rojo bajo el bloque del logo
-            g.line(lx + 16.0, y + 76.0, lx + tw - 16.0, y + 76.0, BORDER, 0.85, 1.0);
-            g.line(lx + 16.0, y + 76.0, lx + 74.0, y + 76.0, BRAND_RED, 0.95, 2.0);
+            g.line(lx + 16.0, y + 76.0, lx + tw - 16.0, y + 76.0, pal.border, 0.85, 1.0);
+            g.line(lx + 16.0, y + 76.0, lx + 74.0, y + 76.0, pal.brand_red, 0.95, 2.0);
         }
     }
 
     pub(crate) fn icon_btn(&self, x: f32, y: f32, glyph: &str, id: Hit) {
+        let pal = self.pal();
         let g = &self.gfx;
         let hov = self.hov(id);
-        g.rrect(x, y, 28.0, 28.0, 9.0, WHITE, if hov { 0.14 } else { 0.0 });
-        g.text(glyph, &g.f.icon, x, y, 28.0, 28.0, if hov { WHITE } else { GRAY }, 1.0);
+        g.rrect(x, y, 28.0, 28.0, 9.0, pal.white, if hov { 0.14 } else { 0.0 });
+        g.text(glyph, &g.f.icon, x, y, 28.0, 28.0, if hov { pal.white } else { pal.gray }, 1.0);
         self.hit(x, y, 28.0, 28.0, id);
     }
 
@@ -1464,6 +1478,7 @@ impl App {
         active: bool,
         id: Hit,
     ) {
+        let pal = self.pal();
         let g = &self.gfx;
         let hov = self.hov(id);
         g.rrect(
@@ -1487,7 +1502,7 @@ impl App {
             w - 1.0,
             h - 1.0,
             8.0,
-            if active || hov { color } else { BORDER },
+            if active || hov { color } else { pal.border },
             if active || hov { 0.65 } else { 0.8 },
             1.0,
         );
@@ -1498,7 +1513,7 @@ impl App {
             y,
             w,
             h,
-            if active || hov { color } else { GRAY },
+            if active || hov { color } else { pal.gray },
             1.0,
         );
         self.hit(x, y, w, h, id);
@@ -1514,6 +1529,7 @@ impl App {
         active: bool,
         id: Hit,
     ) {
+        let pal = self.pal();
         let g = &self.gfx;
         let hov = self.hov(id);
         g.rrect(
@@ -1537,7 +1553,7 @@ impl App {
             s - 1.0,
             s - 1.0,
             8.0,
-            if active || hov { color } else { BORDER },
+            if active || hov { color } else { pal.border },
             if active || hov { 0.65 } else { 0.8 },
             1.0,
         );
@@ -1548,33 +1564,35 @@ impl App {
             y,
             s,
             s,
-            if active || hov { color } else { GRAY },
+            if active || hov { color } else { pal.gray },
             1.0,
         );
         self.hit(x, y, s, s, id);
     }
 
     pub(crate) fn row_bg(&self, x: f32, y: f32, w: f32, h: f32, id: Hit, sel: bool) {
+        let pal = self.pal();
         let g = &self.gfx;
         let hov = self.hov(id);
-        g.rrect(x, y, w, h, 13.0, if hov || sel { CARD_HOV } else { CARD }, 1.0);
+        g.rrect(x, y, w, h, 13.0, if hov || sel { pal.card_hov } else { pal.card }, 1.0);
         g.rrect_stroke(
             x + 0.5,
             y + 0.5,
             w - 1.0,
             h - 1.0,
             13.0,
-            if sel { CYAN } else if hov { GLACIER } else { BORDER },
+            if sel { pal.cyan } else if hov { pal.glacier } else { pal.border },
             if sel { 0.90 } else if hov { 0.45 } else { 0.75 },
             1.0,
         );
         if sel {
-            g.rrect(x + 2.0, y + 9.0, 3.0, (h - 18.0).max(8.0), 1.5, BRAND_RED, 0.95);
+            g.rrect(x + 2.0, y + 9.0, 3.0, (h - 18.0).max(8.0), 1.5, pal.brand_red, 0.95);
         }
         self.hit(x, y, w, h, id);
     }
 
     pub(crate) fn toggle_pill(&self, x: f32, y: f32, on: bool) {
+        let pal = self.pal();
         let g = &self.gfx;
         g.rrect(
             x,
@@ -1582,14 +1600,15 @@ impl App {
             38.0,
             20.0,
             10.0,
-            if on { CYAN } else { BORDER },
-            if on { 0.92 } else { 1.0 },
+            if on { pal.cyan } else { pal.border },
+            if on { 0.95 } else { 1.0 },
         );
         let kx = if on { x + 20.0 } else { x + 2.0 };
-        g.circle(kx + 8.0, y + 10.0, 7.0, if on { WHITE } else { GRAY }, 1.0);
+        g.circle(kx + 8.0, y + 10.0, 7.0, if on { 0xFFFFFF } else { pal.gray }, 1.0);
     }
 
     pub(crate) fn draw_tooltip(&self, win_x: f32, win_y: f32, win_w: f32, win_h: f32) {
+        let pal = self.pal();
         let Some(hov) = self.hover else { return };
         let label: Option<String> = match hov {
             Hit::Settings => Some("Configuración general".into()),
@@ -1683,7 +1702,8 @@ impl App {
             }
             Hit::OpenWinFocus(_) => Some("Saltar a la ventana ya abierta de este proyecto".into()),
             Hit::OpenWinClose(_) => Some("Cerrar la ventana de este proyecto".into()),
-            Hit::SetPosition(p) => Some(format!("Mover la isla a: {}", p.label())),
+            Hit::SetPosition(pos) => Some(format!("Mover la isla a: {}", pos.label())),
+            Hit::ToggleTheme => Some(if pal.light { "Cambiar a Modo Oscuro".into() } else { "Cambiar a Modo Blanco Polar".into() }),
             _ => None,
         };
         let Some(txt) = label else { return };
@@ -1710,8 +1730,8 @@ impl App {
 
         g.rrect(tx - 1.0, ty + 1.5, tw + 2.0, th + 1.0, 6.0, 0x000000, 0.7);
         g.rrect(tx, ty, tw, th, 6.0, 0x18181B, 0.98);
-        g.rrect_stroke(tx + 0.5, ty + 0.5, tw - 1.0, th - 1.0, 6.0, WHITE, 0.28, 1.0);
-        g.text(&txt, &g.f.tiny_c, tx + 6.0, ty, tw - 12.0, th, WHITE, 0.98);
+        g.rrect_stroke(tx + 0.5, ty + 0.5, tw - 1.0, th - 1.0, 6.0, pal.white, 0.28, 1.0);
+        g.text(&txt, &g.f.tiny_c, tx + 6.0, ty, tw - 12.0, th, pal.white, 0.98);
     }
 }
 

@@ -71,6 +71,30 @@ pub(crate) const G_WORK: &str = "\u{E821}";
 pub(crate) const G_KEY: &str = "\u{E8D7}";
 pub(crate) const G_DISK: &str = "\u{EDA2}";
 pub(crate) const G_COPY: &str = "\u{E8C8}";
+pub(crate) const G_SUN: &str = "\u{E706}";
+pub(crate) const G_MOON: &str = "\u{E708}";
+
+#[derive(Clone, Copy)]
+pub(crate) struct Pal {
+    pub(crate) light: bool,
+    pub(crate) body: u32,
+    pub(crate) card: u32,
+    pub(crate) card_hov: u32,
+    pub(crate) border: u32,
+    pub(crate) white: u32,
+    pub(crate) gray: u32,
+    pub(crate) dim: u32,
+    pub(crate) accent: u32,
+    pub(crate) glacier: u32,
+    pub(crate) cyan: u32,
+    pub(crate) brand_red: u32,
+    pub(crate) red: u32,
+    pub(crate) green: u32,
+    pub(crate) amber: u32,
+    pub(crate) box_bg: u32,
+    pub(crate) inv_ink: u32,
+    pub(crate) shadow: u32,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FilterMode {
@@ -195,6 +219,7 @@ pub enum Hit {
     ToggleSounds,
     CycleMonitor,
     SetPosition(IslandPos),
+    ToggleTheme,
     Startup,
     DefaultLauncher,
     BaseDir,
@@ -847,6 +872,52 @@ impl App {
         IslandPos::from_str(&self.cfg.position)
     }
 
+    pub(crate) fn pal(&self) -> Pal {
+        if self.cfg.light_mode {
+            Pal {
+                light: true,
+                body: 0xF4F7FB,
+                card: 0xFFFFFF,
+                card_hov: 0xE6F0FA,
+                border: 0xCBD5E1,
+                white: 0x0F172A,
+                gray: 0x475569,
+                dim: 0x64748B,
+                accent: 0x0284C7,
+                glacier: 0x0284C7,
+                cyan: 0x0EA5E9,
+                brand_red: BRAND_RED,
+                red: BRAND_RED,
+                green: 0x16A34A,
+                amber: 0xD97706,
+                box_bg: 0xEBF1F7,
+                inv_ink: 0xF8FAFC,
+                shadow: 0x0F172A,
+            }
+        } else {
+            Pal {
+                light: false,
+                body: BODY,
+                card: CARD,
+                card_hov: CARD_HOV,
+                border: BORDER,
+                white: WHITE,
+                gray: GRAY,
+                dim: DIM,
+                accent: ACCENT,
+                glacier: GLACIER,
+                cyan: CYAN,
+                brand_red: BRAND_RED,
+                red: RED,
+                green: GREEN,
+                amber: AMBER,
+                box_bg: 0x07090D,
+                inv_ink: 0x05070B,
+                shadow: 0x000000,
+            }
+        }
+    }
+
     pub(crate) fn desired_window_pos(&self, mon_rc: RECT, work_rc: RECT) -> (i32, i32) {
         let pos = self.island_pos();
         let x = match pos {
@@ -1126,7 +1197,7 @@ impl App {
                 let chips_bar = 56.0;
                 (808.0, 86.0 + ports_bar + search_bar + chips_bar + n * 54.0 + 54.0 + 18.0, 26.0)
             }
-            View::Settings => (548.0, 64.0 + 84.0 + 10.0 * 44.0 + 34.0, 26.0),
+            View::Settings => (548.0, 64.0 + 84.0 + 11.0 * 44.0 + 34.0, 26.0),
             View::Wizard => {
                 let rows = match self.step {
                     Step::Name => self.cfg.templates.len().min(5) as f32 * 46.0 + 118.0,
@@ -2453,6 +2524,12 @@ impl App {
                 actions::play_ui_sound("click", self.cfg.sounds_enabled);
                 self.kick();
             }
+            Hit::ToggleTheme => {
+                self.cfg.light_mode = !self.cfg.light_mode;
+                self.save();
+                actions::play_ui_sound("click", self.cfg.sounds_enabled);
+                self.kick();
+            }
             Hit::Startup => {
                 self.startup = !self.startup;
                 actions::set_startup(self.startup);
@@ -3433,6 +3510,16 @@ impl App {
             let _ = AppendMenuW(
                 menu,
                 MF_STRING,
+                26,
+                if self.cfg.light_mode {
+                    w!("Cambiar a Modo Oscuro")
+                } else {
+                    w!("Cambiar a Modo Blanco")
+                },
+            );
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
                 4,
                 if self.visible {
                     w!("Ocultar isla")
@@ -3481,6 +3568,7 @@ impl App {
                         self.click(Hit::SetPosition(pos));
                     }
                 }
+                26 => self.click(Hit::ToggleTheme),
                 _ => {}
             }
         }
