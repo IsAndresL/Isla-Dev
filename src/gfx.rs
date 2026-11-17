@@ -15,6 +15,7 @@ pub static LOGO_PNG: &[u8] = include_bytes!("../logo/logo.png");
 
 #[allow(dead_code)]
 pub struct Fonts {
+    pub brand: IDWriteTextFormat,
     pub title: IDWriteTextFormat,
     pub title_c: IDWriteTextFormat,
     pub body: IDWriteTextFormat,
@@ -120,6 +121,7 @@ impl Fonts {
         let c = DWRITE_TEXT_ALIGNMENT_CENTER;
         let r = DWRITE_TEXT_ALIGNMENT_TRAILING;
         Ok(Self {
+            brand: fmt(dw, &ui, 18.0, DWRITE_FONT_WEIGHT_BOLD, l)?,
             title: fmt(dw, &ui, 14.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, l)?,
             title_c: fmt(dw, &ui, 15.0, DWRITE_FONT_WEIGHT_BOLD, c)?,
             body: fmt(dw, &ui, 13.5, DWRITE_FONT_WEIGHT_NORMAL, l)?,

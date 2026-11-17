@@ -198,9 +198,10 @@ impl App {
             ),
             (false, false) => format!("{} proyectos", self.cfg.projects.len()),
         };
-        self.header(lx, y, tw, "Mis Proyectos", &counts, false);
+        let sub = format!("Mis Proyectos · {counts}");
+        self.header(lx, y, tw, "Isla Dev", &sub, false);
 
-        let mut cur_y = y + 90.0;
+        let mut cur_y = y + 84.0;
 
         // 1. Barra de Puertos Locales Activos
         if !self.active_ports.is_empty() || !self.active_tasks.is_empty() {
@@ -1410,26 +1411,37 @@ impl App {
             g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
             g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
         } else {
-            // Izquierda: Mis Proyectos + conteo
-            g.text(title, &g.f.title, lx + 18.0, y + 18.0, 240.0, 22.0, WHITE, 1.0);
-            g.text(sub, &g.f.sub, lx + 18.0, y + 40.0, 260.0, 17.0, GLACIER, 0.95);
+            // Izquierda: Logo grande protagonista (58x58) + halo dual + "Isla Dev" y "Mis Proyectos" debajo
+            let logo_s = 58.0;
+            let logo_x = lx + 16.0;
+            let logo_y = y + 10.0;
+            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 34.0, GLACIER, 0.11);
+            g.circle(logo_x + logo_s / 2.0, logo_y + logo_s / 2.0, 30.0, BRAND_RED, 0.24);
+            g.draw_logo(logo_x, logo_y, logo_s, logo_s, 1.0);
 
-            // Centro: logo protagonista grande + halo + "Isla Dev" debajo
-            let mid_x = lx + tw / 2.0;
-            let logo_s = 52.0;
-            let logo_y = y + 8.0;
-            g.circle(mid_x, logo_y + logo_s / 2.0, 32.0, GLACIER, 0.10);
-            g.circle(mid_x, logo_y + logo_s / 2.0, 28.0, BRAND_RED, 0.22);
-            g.draw_logo(mid_x - logo_s / 2.0, logo_y, logo_s, logo_s, 1.0);
-            g.text("Isla Dev", &g.f.title_c, mid_x - 90.0, y + 61.0, 180.0, 20.0, WHITE, 1.0);
+            let tx = lx + 86.0;
+            g.text(title, &g.f.brand, tx, y + 14.0, 240.0, 24.0, WHITE, 1.0);
+            g.text(sub, &g.f.sub, tx, y + 41.0, 265.0, 18.0, GLACIER, 0.96);
+
+            // Zona decorativa central-derecha: líneas rojas #E4002B escalonadas de larga a corta
+            let lines_x = lx + 362.0;
+            let max_lw = (tw - 362.0 - 102.0).max(120.0);
+            let l1 = max_lw.min(280.0);
+            let l2 = (l1 * 0.64).max(70.0);
+            let l3 = (l1 * 0.34).max(40.0);
+            g.rrect(lines_x, y + 23.0, l1, 3.5, 1.75, BRAND_RED, 0.95);
+            g.rrect(lines_x + l1 + 6.0, y + 23.0, 18.0, 3.5, 1.75, GLACIER, 0.72);
+            g.rrect(lines_x, y + 35.0, l2, 3.5, 1.75, BRAND_RED, 0.75);
+            g.rrect(lines_x, y + 47.0, l3, 3.5, 1.75, BRAND_RED, 0.52);
+            g.rrect(lines_x + l3 + 6.0, y + 47.0, 10.0, 3.5, 1.75, WHITE, 0.65);
 
             // Derecha: Ajustes y Cerrar
-            self.icon_btn(lx + tw - 80.0, y + 20.0, G_GEAR, Hit::Settings);
-            self.icon_btn(lx + tw - 44.0, y + 20.0, G_CLOSE, Hit::Close);
+            self.icon_btn(lx + tw - 80.0, y + 24.0, G_GEAR, Hit::Settings);
+            self.icon_btn(lx + tw - 44.0, y + 24.0, G_CLOSE, Hit::Close);
 
-            // Línea divisoria con acento centrado bajo Isla Dev
-            g.line(lx + 16.0, y + 84.0, lx + tw - 16.0, y + 84.0, BORDER, 0.85, 1.0);
-            g.line(mid_x - 36.0, y + 84.0, mid_x + 36.0, y + 84.0, BRAND_RED, 0.95, 2.0);
+            // Línea divisoria con acento rojo bajo el bloque del logo
+            g.line(lx + 16.0, y + 76.0, lx + tw - 16.0, y + 76.0, BORDER, 0.85, 1.0);
+            g.line(lx + 16.0, y + 76.0, lx + 74.0, y + 76.0, BRAND_RED, 0.95, 2.0);
         }
     }
 
