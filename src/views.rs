@@ -15,13 +15,19 @@ impl App {
 
         if is_compact {
             let glow_t = self.glow_anim.clamp(0.0, 1.0);
-            let border_col = if self.has_live_server() { GREEN } else { WHITE };
-            let border_alpha = if self.glow_anim > 0.01 {
-                0.28 + 0.25 * glow_t
-            } else if self.has_live_server() {
-                0.35
+            let border_col = if self.has_live_server() {
+                GREEN
+            } else if self.glow_anim > 0.01 {
+                GLACIER
             } else {
-                0.15
+                GLACIER
+            };
+            let border_alpha = if self.glow_anim > 0.01 {
+                0.35 + 0.35 * glow_t
+            } else if self.has_live_server() {
+                0.42
+            } else {
+                0.24
             };
 
             if is_waterdrop {
@@ -39,20 +45,10 @@ impl App {
                     g.draw_waterdrop_progress(cx, w, h, prog, GREEN);
                 }
             } else {
-                // Cápsula / píldora flotante para esquinas o borde inferior
+                // Cápsula / píldora flotante para esquinas o borde inferior (#E4002B + Azul Glaciar + Blanco Polar)
                 if self.glow_anim > 0.01 {
-                    for (pad, a) in [(4.0, 0.14 * glow_t), (2.0, 0.24 * glow_t)] {
-                        g.rrect_stroke(
-                            x - pad,
-                            y - pad,
-                            w + pad * 2.0,
-                            h + pad * 2.0,
-                            r + pad,
-                            CYAN,
-                            a,
-                            2.0,
-                        );
-                    }
+                    g.rrect_stroke(x - 4.0, y - 4.0, w + 8.0, h + 8.0, r + 4.0, CYAN, 0.22 * glow_t, 2.2);
+                    g.rrect_stroke(x - 2.0, y - 2.0, w + 4.0, h + 4.0, r + 2.0, BRAND_RED, 0.42 * glow_t, 1.6);
                 }
                 g.rrect(x - 1.5, y + 1.0, w + 3.0, h + 3.0, r + 1.5, 0x000000, 0.52);
                 g.rrect(x, y, w, h, r, BODY, 1.0);
@@ -72,7 +68,7 @@ impl App {
                 g.fill_path(&panel, BODY, 0.99);
             }
             if let Ok(border) = g.top_panel_curve_path(x + 0.5, w - 1.0, h - 0.5, r) {
-                g.stroke_path(&border, WHITE, 0.14, 1.0);
+                g.stroke_path(&border, GLACIER, 0.22, 1.0);
                 if let Some(prog) = self.bg_progress {
                     let f = prog.clamp(0.05, 1.0);
                     g.clip(x - 2.0, y, (w + 4.0) * f, h + 6.0);
@@ -85,7 +81,7 @@ impl App {
             // Panel flotante con las 4 esquinas redondeadas para esquinas y zona inferior
             g.rrect(x - 2.0, y - 1.0, w + 4.0, h + 5.0, r + 2.0, 0x000000, 0.55);
             g.rrect(x, y, w, h, r, BODY, 0.99);
-            g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, WHITE, 0.14, 1.0);
+            g.rrect_stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r, GLACIER, 0.22, 1.0);
             if let Some(prog) = self.bg_progress {
                 let f = prog.clamp(0.05, 1.0);
                 g.clip(x - 2.0, y - 2.0, (w + 4.0) * f, h + 4.0);
@@ -144,11 +140,14 @@ impl App {
             }
         } else if !is_waterdrop {
             if expanded_pill {
-                g.text(G_TERM, &g.f.icon_xs, x + 14.0, y, 16.0, h, CYAN, 0.95);
-                g.text("Isla Dev", &g.f.tiny, x + 32.0, y, w - 38.0, h, WHITE, 0.9);
+                g.circle(x + 12.0, y + h / 2.0, 3.0, BRAND_RED, 1.0);
+                g.text("Isla Dev", &g.f.badge, x + 21.0, y, w - 26.0, h, WHITE, 0.96);
             } else {
-                g.rrect(x + w / 2.0 - 8.0, y + h / 2.0 - 1.5, 16.0, 3.0, 1.5, WHITE, 0.35);
+                g.circle(x + w / 2.0 - 9.0, y + h / 2.0, 2.2, BRAND_RED, 0.95);
+                g.rrect(x + w / 2.0 - 3.0, y + h / 2.0 - 1.5, 13.0, 3.0, 1.5, GLACIER, 0.85);
             }
+        } else if expanded_pill {
+            g.circle(x + w / 2.0, y + h / 2.0, 2.4, BRAND_RED, 0.95);
         }
 
         // Superficie con alpha mínimo (1/255, invisible al ojo) para capturar siempre el primer clic/hover.
@@ -317,15 +316,15 @@ impl App {
             sb_w - 1.0,
             sb_h - 1.0,
             10.0,
-            if has_q { WHITE } else { BORDER },
-            if has_q { 0.45 } else { 0.8 },
+            if has_q { CYAN } else { BORDER },
+            if has_q { 0.65 } else { 0.85 },
             1.0,
         );
-        g.text(G_SEARCH, &g.f.icon_sm, sb_x + 8.0, cur_y, 24.0, sb_h, GRAY, 0.9);
+        g.text(G_SEARCH, &g.f.icon_sm, sb_x + 8.0, cur_y, 24.0, sb_h, GLACIER, 0.9);
         if has_q {
             g.text(&self.search, &g.f.body, sb_x + 34.0, cur_y, sb_w - 68.0, sb_h, WHITE, 1.0);
             let tx = (sb_x + 34.0 + g.measure(&self.search, &g.f.body) + 1.5).min(sb_x + sb_w - 36.0);
-            g.line(tx, cur_y + 8.0, tx, cur_y + sb_h - 8.0, WHITE, 0.9, 1.4);
+            g.line(tx, cur_y + 8.0, tx, cur_y + sb_h - 8.0, CYAN, 0.95, 1.4);
             let clr_hov = self.hov(Hit::ClearSearch);
             g.text(
                 G_CLOSE,
@@ -381,8 +380,8 @@ impl App {
                 cw,
                 chip_h,
                 7.0,
-                if active { WHITE } else { CARD },
-                if active { 0.18 } else if hov { 0.95 } else { 0.75 },
+                if active { BRAND_RED } else { CARD },
+                if active { 0.22 } else if hov { 0.95 } else { 0.75 },
             );
             g.rrect_stroke(
                 row1_x + 0.5,
@@ -390,7 +389,7 @@ impl App {
                 cw - 1.0,
                 chip_h - 1.0,
                 7.0,
-                if active || hov { WHITE } else { BORDER },
+                if active { BRAND_RED } else if hov { GLACIER } else { BORDER },
                 if active { 0.85 } else { 0.65 },
                 1.0,
             );
@@ -1060,8 +1059,8 @@ impl App {
         ry += 4.0;
         let new_btn_h = 46.0;
         self.row_bg(lx + 16.0, ry, left_w - 24.0, new_btn_h, Hit::NewProject, false);
-        g.rrect(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, WHITE, 0.08);
-        g.rrect_stroke(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, BORDER, 0.9, 1.0);
+        g.rrect(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, BRAND_RED, 0.22);
+        g.rrect_stroke(lx + 24.0, ry + 7.0, 32.0, 32.0, 9.0, BRAND_RED, 0.78, 1.0);
         g.text(G_ADD, &g.f.icon, lx + 24.0, ry + 7.0, 32.0, 32.0, WHITE, 1.0);
         g.text(
             "Crear nuevo proyecto",
@@ -1074,7 +1073,7 @@ impl App {
             1.0,
         );
         g.rrect(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, CARD_HOV, 1.0);
-        g.rrect_stroke(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, BORDER, 0.9, 1.0);
+        g.rrect_stroke(lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, 6.0, GLACIER, 0.42, 1.0);
         g.text("Ctrl N", &g.f.badge, lx + left_w - 82.0, ry + 12.0, 62.0, 22.0, GRAY, 1.0);
 
         let left_bottom_y = ry + new_btn_h;
@@ -1409,12 +1408,13 @@ impl App {
             g.draw_logo(lx + 16.0, y + 14.0, 32.0, 32.0, 1.0);
         }
         g.text(title, &g.f.title, lx + 56.0, y + 13.0, tw - 140.0, 20.0, WHITE, 1.0);
-        g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, GRAY, 1.0);
+        g.text(sub, &g.f.sub, lx + 56.0, y + 32.0, tw - 140.0, 16.0, GLACIER, 0.92);
         if !back {
             self.icon_btn(lx + tw - 80.0, y + 15.0, G_GEAR, Hit::Settings);
         }
         self.icon_btn(lx + tw - 44.0, y + 15.0, G_CLOSE, Hit::Close);
-        g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.8, 1.0);
+        g.line(lx + 16.0, y + 56.0, lx + tw - 16.0, y + 56.0, BORDER, 0.85, 1.0);
+        g.line(lx + 16.0, y + 56.0, lx + 52.0, y + 56.0, BRAND_RED, 0.95, 1.8);
     }
 
     pub(crate) fn icon_btn(&self, x: f32, y: f32, glyph: &str, id: Hit) {
@@ -1536,10 +1536,13 @@ impl App {
             w - 1.0,
             h - 1.0,
             13.0,
-            if sel { WHITE } else { BORDER },
-            if sel { 0.85 } else { 0.7 },
+            if sel { CYAN } else if hov { GLACIER } else { BORDER },
+            if sel { 0.90 } else if hov { 0.45 } else { 0.75 },
             1.0,
         );
+        if sel {
+            g.rrect(x + 2.0, y + 9.0, 3.0, (h - 18.0).max(8.0), 1.5, BRAND_RED, 0.95);
+        }
         self.hit(x, y, w, h, id);
     }
 
@@ -1551,11 +1554,11 @@ impl App {
             38.0,
             20.0,
             10.0,
-            if on { WHITE } else { 0x27272A },
-            if on { 0.95 } else { 1.0 },
+            if on { CYAN } else { BORDER },
+            if on { 0.92 } else { 1.0 },
         );
         let kx = if on { x + 20.0 } else { x + 2.0 };
-        g.circle(kx + 8.0, y + 10.0, 7.0, if on { 0x000000 } else { GRAY }, 1.0);
+        g.circle(kx + 8.0, y + 10.0, 7.0, if on { WHITE } else { GRAY }, 1.0);
     }
 
     pub(crate) fn draw_tooltip(&self, win_x: f32, win_y: f32, win_w: f32, win_h: f32) {

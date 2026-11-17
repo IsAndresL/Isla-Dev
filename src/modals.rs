@@ -105,10 +105,10 @@ impl App {
         let py = y + 64.0;
         let pw = tw - 32.0;
         let ph = 76.0;
-        g.rrect(px, py, pw, ph, 12.0, WHITE, 0.04);
-        g.rrect_stroke(px, py, pw, ph, 12.0, WHITE, 0.10, 1.0);
+        g.rrect(px, py, pw, ph, 12.0, CARD, 0.95);
+        g.rrect_stroke(px, py, pw, ph, 12.0, GLACIER, 0.20, 1.0);
         g.text("Posición en pantalla", &g.f.body, px + 14.0, py + 9.0, 290.0, 19.0, WHITE, 1.0);
-        g.text(cur_pos.label(), &g.f.sub, px + 14.0, py + 29.0, 290.0, 17.0, CYAN, 1.0);
+        g.text(cur_pos.label(), &g.f.sub, px + 14.0, py + 29.0, 290.0, 17.0, GLACIER, 1.0);
         g.text(
             "Siempre visible · Se oculta en fullscreen",
             &g.f.tiny,
@@ -124,9 +124,9 @@ impl App {
         let my = py + 8.0;
         let mw = 182.0;
         let mh = 60.0;
-        g.rrect(mx, my, mw, mh, 9.0, 0x090D16, 0.95);
-        g.rrect_stroke(mx, my, mw, mh, 9.0, WHITE, 0.16, 1.0);
-        g.rrect(mx + 8.0, my + mh - 5.0, mw - 16.0, 2.5, 1.2, WHITE, 0.12);
+        g.rrect(mx, my, mw, mh, 9.0, BODY, 0.96);
+        g.rrect_stroke(mx, my, mw, mh, 9.0, GLACIER, 0.25, 1.0);
+        g.rrect(mx + 8.0, my + mh - 5.0, mw - 16.0, 2.5, 1.2, GLACIER, 0.35);
 
         let spots: [(IslandPos, &str, f32, f32); 6] = [
             (IslandPos::TopLeft, "Izq", mx + 7.0, my + 6.0),
@@ -139,10 +139,10 @@ impl App {
         for (spot, lbl, sx, sy) in spots {
             let active = cur_pos == spot;
             let hov = self.hov(Hit::SetPosition(spot));
-            let bg = if active { CYAN } else { WHITE };
-            let ba = if active { 0.85 } else if hov { 0.22 } else { 0.08 };
-            let bc = if active { WHITE } else { WHITE };
-            let bca = if active { 0.85 } else if hov { 0.45 } else { 0.16 };
+            let bg = if active { BRAND_RED } else { CARD_HOV };
+            let ba = if active { 0.95 } else if hov { 0.95 } else { 0.85 };
+            let bc = if active { WHITE } else if hov { GLACIER } else { BORDER };
+            let bca = if active { 0.90 } else if hov { 0.85 } else { 0.9 };
             g.rrect(sx, sy, 44.0, 16.0, 8.0, bg, ba);
             g.rrect_stroke(sx, sy, 44.0, 16.0, 8.0, bc, bca, 1.0);
             g.text(

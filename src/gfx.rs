@@ -508,18 +508,18 @@ impl Gfx {
         }
     }
 
-    /// Animación del aro de luz exterior que rodea el notch en hover
+    /// Animación del aro de luz exterior que rodea el notch en hover (#E4002B + Azul Glaciar + Blanco Polar)
     pub fn draw_glow_ring(&self, cx: f32, w: f32, h: f32, pulse: f32) {
         if pulse <= 0.005 {
             return;
         }
         if let Ok(curve) = self.waterdrop_curve_path(cx, w, h) {
-            // Halo difuso exterior amplio
-            self.stroke_path(&curve, 0xFFFFFF, 0.12 * pulse, 6.0);
-            // Halo intermedio
-            self.stroke_path(&curve, 0xFFFFFF, 0.28 * pulse, 3.2);
-            // Aro luminoso nítido
-            self.stroke_path(&curve, 0xFFFFFF, 0.90 * pulse, 1.4);
+            // Halo difuso exterior Azul Glaciar
+            self.stroke_path(&curve, 0x38BDF8, 0.22 * pulse, 6.2);
+            // Halo intermedio Rojo Marca #E4002B
+            self.stroke_path(&curve, 0xE4002B, 0.45 * pulse, 3.2);
+            // Aro luminoso nítido Blanco Polar
+            self.stroke_path(&curve, 0xF8FAFC, 0.90 * pulse, 1.3);
         }
     }
 

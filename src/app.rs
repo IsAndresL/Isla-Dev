@@ -28,16 +28,18 @@ const TIMER_CONSOLE: usize = 4;
 const HOTKEY_ID: i32 = 1;
 pub(crate) const MAX_ROWS: usize = 6;
 
-// Paleta Black & White minimalista (Apple / Vercel / Linear style) + indicadores semánticos
-pub(crate) const WHITE: u32 = 0xFFFFFF;
-pub(crate) const GRAY: u32 = 0xA1A1AA;
-pub(crate) const DIM: u32 = 0x52525B;
-pub(crate) const ACCENT: u32 = 0xFFFFFF;
-pub(crate) const BODY: u32 = 0x000000;
-pub(crate) const CARD: u32 = 0x121214;
-pub(crate) const CARD_HOV: u32 = 0x1C1C20;
-pub(crate) const BORDER: u32 = 0x27272A;
-pub(crate) const RED: u32 = 0xEF4444;
+// Paleta #E4002B + Azul Glaciar + Blanco Polar sobre fondo nocturno profundo
+pub(crate) const WHITE: u32 = 0xF8FAFC;
+pub(crate) const GRAY: u32 = 0x94A3B8;
+pub(crate) const DIM: u32 = 0x475569;
+pub(crate) const ACCENT: u32 = 0x38BDF8;
+pub(crate) const GLACIER: u32 = 0x7DD3FC;
+pub(crate) const BRAND_RED: u32 = 0xE4002B;
+pub(crate) const BODY: u32 = 0x05070B;
+pub(crate) const CARD: u32 = 0x0D121B;
+pub(crate) const CARD_HOV: u32 = 0x151E2E;
+pub(crate) const BORDER: u32 = 0x1E293B;
+pub(crate) const RED: u32 = 0xE4002B;
 pub(crate) const GREEN: u32 = 0x22C55E;
 pub(crate) const AMBER: u32 = 0xF59E0B;
 pub(crate) const CYAN: u32 = 0x38BDF8;
